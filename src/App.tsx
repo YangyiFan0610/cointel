@@ -45,11 +45,13 @@ interface KOLComment {
   content: string;
   time: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
+  type: 'twitter' | 'youtube' | 'macro';
+  url?: string;
 }
 
 interface InstitutionalSignal {
   source: string;
-  signal: 'BUY' | 'SELL' | 'HOLD';
+  signal: '买入' | '卖出' | '持有';
   confidence: number;
   summary: string;
 }
@@ -68,16 +70,18 @@ const generateChartData = (points: number): MarketData[] => {
 };
 
 const MOCK_KOLS: KOLComment[] = [
-  { id: '1', author: 'PlanB', handle: '@100trillionUSD', content: 'S2F model still on track. BTC scarcity is the ultimate driver. Patience is key.', time: '2m ago', sentiment: 'bullish' },
-  { id: '2', author: 'Peter Schiff', handle: '@PeterSchiff', content: 'Bitcoin is a digital bubble. Gold is the only real store of value. Get out while you can.', time: '15m ago', sentiment: 'bearish' },
-  { id: '3', author: 'Willy Woo', handle: '@woonomic', content: 'On-chain data shows massive accumulation by whales. Exchange balances hitting multi-year lows.', time: '34m ago', sentiment: 'bullish' },
-  { id: '4', author: 'Glassnode', handle: '@glassnode', content: 'Realized cap reaching new ATHs. Market structure remains robust despite short-term volatility.', time: '1h ago', sentiment: 'neutral' },
+  { id: '1', author: 'PlanB', handle: '@100trillionUSD', content: 'S2F 模型仍在轨道上。BTC 的稀缺性是最终驱动力。耐心是关键。', time: '2分钟前', sentiment: 'bullish', type: 'twitter' },
+  { id: '2', author: 'Donald Trump', handle: '@realDonaldTrump', content: '我们要让美国成为全球加密货币之都！比特币是未来的自由。', time: '15分钟前', sentiment: 'bullish', type: 'macro' },
+  { id: '3', author: 'Benjamin Cowen', handle: 'Into The Cryptoverse', content: '【视频】比特币减半后的宏观周期分析：我们正处于关键支撑位。', time: '45分钟前', sentiment: 'neutral', type: 'youtube', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
+  { id: '4', author: '联准会 (Fed)', handle: 'Macro Update', content: '鲍威尔暗示降息节奏可能放缓，宏观流动性预期出现波动。', time: '1小时前', sentiment: 'bearish', type: 'macro' },
+  { id: '5', author: 'Willy Woo', handle: '@woonomic', content: '链上数据显示大户正在疯狂吸筹。交易所库存降至多年低点。', time: '2小时前', sentiment: 'bullish', type: 'twitter' },
+  { id: '6', author: 'Coin Bureau', handle: 'YouTube', content: '【视频】2026年最值得关注的3个比特币 L2 项目。', time: '3小时前', sentiment: 'bullish', type: 'youtube', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
 ];
 
 const MOCK_INSTITUTIONS: InstitutionalSignal[] = [
-  { source: 'Goldman Sachs', signal: 'HOLD', confidence: 65, summary: 'Macro headwinds persist, but institutional adoption provides a floor.' },
-  { source: 'BlackRock', signal: 'BUY', confidence: 88, summary: 'ETF inflows accelerating. Spot demand outstripping supply.' },
-  { source: 'J.P. Morgan', signal: 'SELL', confidence: 42, summary: 'Short-term overbought signals on technical indicators.' },
+  { source: '高盛 (Goldman Sachs)', signal: '持有', confidence: 65, summary: '宏观阻力依然存在，但机构采用提供了底部支撑。' },
+  { source: '贝莱德 (BlackRock)', signal: '买入', confidence: 88, summary: 'ETF 流入加速。现货需求远超供应。' },
+  { source: '摩根大通 (J.P. Morgan)', signal: '卖出', confidence: 42, summary: '技术指标显示短期处于超买状态。' },
 ];
 
 // --- Components ---
@@ -87,12 +91,11 @@ export default function App() {
   const [currentPrice, setCurrentPrice] = useState(68432);
   const [priceChange, setPriceChange] = useState(2.4);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [aiSummary, setAiSummary] = useState("Aggregating real-time data from 12 sources...");
+  const [aiSummary, setAiSummary] = useState("正在聚合来自 12 个源的实时数据...");
 
   // Initialize Gemini safely
   const ai = useMemo(() => {
     try {
-      // Check if process and process.env exist before accessing
       const apiKey = (typeof process !== 'undefined' && process.env) ? process.env.GEMINI_API_KEY : undefined;
       if (!apiKey) {
         console.warn("GEMINI_API_KEY not found. AI features will be disabled.");
@@ -117,19 +120,19 @@ export default function App() {
   // AI Analysis Function
   const runAiAnalysis = async () => {
     if (!ai) {
-      setAiSummary("AI Analysis is only available in the secure preview environment.");
+      setAiSummary("AI 智能分析仅在安全预览环境中可用。");
       return;
     }
     setIsAnalyzing(true);
     try {
       const prompt = `
-        Analyze the current Bitcoin market state based on these inputs:
-        - Price: $${currentPrice}
-        - KOL Sentiment: PlanB (Bullish), Peter Schiff (Bearish), Willy Woo (Bullish)
-        - Institutional Signals: BlackRock (Buy), Goldman (Hold), JPM (Sell)
+        请用中文分析当前的比特币市场状态：
+        - 价格: $${currentPrice}
+        - KOL 情绪: PlanB (看涨), Trump (看涨), Fed (看跌)
+        - 机构信号: BlackRock (买入), Goldman (持有), JPM (卖出)
         
-        Provide a 2-sentence "Executive Summary" for an individual investor. 
-        Be direct, concise, and highlight the most critical signal.
+        请为个人投资者提供 2 句极其精炼的“执行摘要”。
+        要求：直接、简洁、指出最关键的信号。
       `;
       
       const response = await ai.models.generateContent({
@@ -137,10 +140,10 @@ export default function App() {
         contents: prompt,
       });
       
-      setAiSummary(response.text || "Analysis failed. Market remains volatile.");
+      setAiSummary(response.text || "分析失败。市场保持波动。");
     } catch (error) {
       console.error("AI Analysis Error:", error);
-      setAiSummary("Analysis unavailable. Ensure you are in the preview environment.");
+      setAiSummary("分析不可用。请确保在预览环境中运行。");
     } finally {
       setIsAnalyzing(false);
     }
@@ -151,19 +154,19 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0A0B0D] text-slate-100 font-mono selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-[#0A0B0D] text-slate-100 font-sans selection:bg-orange-500/30">
       {/* Top Navigation / Status Bar */}
       <nav className="h-14 border-b border-white/5 bg-[#0A0B0D]/80 backdrop-blur-xl flex items-center justify-between px-6 sticky top-0 z-50">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center">
-              <TrendingUp size={14} className="text-black" />
+              <Zap size={14} className="text-black" />
             </div>
-            <span className="font-black text-sm tracking-tighter">BTC_INTEL_v1.0</span>
+            <span className="font-black text-sm tracking-tighter">BTC_情报终端_v2.0</span>
           </div>
           <div className="h-4 w-px bg-white/10" />
           <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-            <span className="flex items-center gap-1.5"><Activity size={12} className="text-emerald-500" /> System Live</span>
+            <span className="flex items-center gap-1.5"><Activity size={12} className="text-emerald-500" /> 系统在线</span>
             <span className="flex items-center gap-1.5"><Clock size={12} /> {new Date().toLocaleTimeString()}</span>
           </div>
         </div>
@@ -172,17 +175,17 @@ export default function App() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
             <input 
               type="text" 
-              placeholder="Search assets..." 
+              placeholder="搜索资产..." 
               className="bg-white/5 border border-white/10 rounded-lg pl-9 pr-4 py-1.5 text-xs outline-none focus:border-orange-500/50 transition-all"
             />
           </div>
-          <button className="p-2 hover:bg-white/5 rounded-lg transition-colors">
+          <button className="p-2 hover:bg-white/5 rounded-lg transition-colors" onClick={runAiAnalysis}>
             <RefreshCw size={16} className="text-slate-400" />
           </button>
         </div>
       </nav>
 
-      <main className="p-6 grid grid-cols-12 gap-6 max-w-[1600px] mx-auto">
+      <main className="p-6 grid grid-cols-12 gap-6 max-w-[1600px] mx-auto pb-16">
         
         {/* Left Column: Market Data & Chart */}
         <div className="col-span-12 lg:col-span-8 space-y-6">
@@ -191,7 +194,7 @@ export default function App() {
           <div className="bg-white/5 border border-white/10 rounded-2xl p-8 flex flex-wrap items-end justify-between gap-8">
             <div>
               <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">
-                <Globe size={14} /> Bitcoin / USD (Spot)
+                <Globe size={14} /> 比特币 / 美元 (现货)
               </div>
               <div className="flex items-baseline gap-4">
                 <h1 className="text-6xl font-black tracking-tighter">
@@ -205,15 +208,15 @@ export default function App() {
             </div>
             <div className="grid grid-cols-3 gap-8 border-l border-white/10 pl-8">
               <div>
-                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">24h High</p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">24h 最高</p>
                 <p className="text-sm font-bold">$69,120</p>
               </div>
               <div>
-                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">24h Low</p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">24h 最低</p>
                 <p className="text-sm font-bold">$67,840</p>
               </div>
               <div>
-                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Volume</p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">成交量</p>
                 <p className="text-sm font-bold">2.4B</p>
               </div>
             </div>
@@ -223,7 +226,7 @@ export default function App() {
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6 h-[450px]">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-4">
-                <h2 className="text-sm font-black uppercase tracking-widest">Price Action</h2>
+                <h2 className="text-sm font-black uppercase tracking-widest">价格走势</h2>
                 <div className="flex bg-white/5 p-1 rounded-lg">
                   {['1H', '4H', '1D', '1W'].map(t => (
                     <button key={t} className={`px-3 py-1 text-[10px] font-bold rounded-md transition-colors ${t === '1H' ? 'bg-orange-500 text-black' : 'text-slate-500 hover:text-white'}`}>
@@ -233,7 +236,7 @@ export default function App() {
                 </div>
               </div>
               <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
-                <div className="w-2 h-2 bg-orange-500 rounded-full" /> Live Feed
+                <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" /> 实时数据流
               </div>
             </div>
             <ResponsiveContainer width="100%" height="100%">
@@ -285,15 +288,15 @@ export default function App() {
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{inst.source}</span>
                   <div className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                    inst.signal === 'BUY' ? 'bg-emerald-500/10 text-emerald-500' : 
-                    inst.signal === 'SELL' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-500/10 text-slate-500'
+                    inst.signal === '买入' ? 'bg-emerald-500/10 text-emerald-500' : 
+                    inst.signal === '卖出' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-500/10 text-slate-500'
                   }`}>
                     {inst.signal}
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed mb-4">{inst.summary}</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-600 font-bold">Confidence</span>
+                  <span className="text-[10px] text-slate-600 font-bold">置信度</span>
                   <div className="w-24 h-1 bg-white/5 rounded-full overflow-hidden">
                     <div className="bg-orange-500 h-full" style={{ width: `${inst.confidence}%` }} />
                   </div>
@@ -311,13 +314,13 @@ export default function App() {
             <div className="relative z-10">
               <div className="flex items-center gap-2 mb-4">
                 <Cpu size={20} className="animate-pulse" />
-                <h2 className="text-sm font-black uppercase tracking-widest">AI Intelligence Engine</h2>
+                <h2 className="text-sm font-black uppercase tracking-widest">AI 智能决策引擎</h2>
               </div>
               <div className="bg-black/20 backdrop-blur-md rounded-xl p-4 border border-white/10 min-h-[100px] flex flex-col justify-center">
                 {isAnalyzing ? (
                   <div className="flex items-center gap-3 text-sm font-bold">
                     <RefreshCw size={16} className="animate-spin" />
-                    Processing market signals...
+                    正在处理市场信号...
                   </div>
                 ) : (
                   <p className="text-sm font-bold leading-relaxed italic">
@@ -330,7 +333,7 @@ export default function App() {
                 disabled={isAnalyzing}
                 className="mt-4 w-full py-2 bg-white text-indigo-600 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-slate-100 transition-all disabled:opacity-50"
               >
-                Refresh Analysis
+                刷新智能分析
               </button>
             </div>
             <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
@@ -340,10 +343,10 @@ export default function App() {
           <div className="bg-white/5 border border-white/10 rounded-2xl flex flex-col h-[700px]">
             <div className="p-6 border-b border-white/5 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Twitter size={18} className="text-sky-400" />
-                <h2 className="text-sm font-black uppercase tracking-widest">KOL Pulse</h2>
+                <MessageSquare size={18} className="text-orange-500" />
+                <h2 className="text-sm font-black uppercase tracking-widest">全网情报脉搏</h2>
               </div>
-              <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded">Live Feed</span>
+              <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded">实时更新</span>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
               {MOCK_KOLS.map((kol) => (
@@ -355,8 +358,10 @@ export default function App() {
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold">
-                        {kol.author[0]}
+                      <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold overflow-hidden">
+                        {kol.type === 'twitter' && <Twitter size={14} className="text-sky-400" />}
+                        {kol.type === 'youtube' && <Zap size={14} className="text-rose-500" />}
+                        {kol.type === 'macro' && <Globe size={14} className="text-emerald-500" />}
                       </div>
                       <div>
                         <p className="text-xs font-bold">{kol.author}</p>
@@ -367,7 +372,7 @@ export default function App() {
                       kol.sentiment === 'bullish' ? 'bg-emerald-500/10 text-emerald-500' : 
                       kol.sentiment === 'bearish' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-500/10 text-slate-500'
                     }`}>
-                      {kol.sentiment}
+                      {kol.sentiment === 'bullish' ? '看涨' : kol.sentiment === 'bearish' ? '看跌' : '中性'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed mb-3">
@@ -375,8 +380,12 @@ export default function App() {
                   </p>
                   <div className="flex items-center justify-between text-[9px] font-bold text-slate-600">
                     <div className="flex items-center gap-3">
-                      <span className="flex items-center gap-1 hover:text-sky-400 cursor-pointer"><MessageSquare size={10} /> 12</span>
-                      <span className="flex items-center gap-1 hover:text-emerald-400 cursor-pointer"><RefreshCw size={10} /> 45</span>
+                      {kol.url && (
+                        <a href={kol.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-rose-500 hover:underline">
+                          <Zap size={10} /> 查看视频
+                        </a>
+                      )}
+                      <span className="flex items-center gap-1"><MessageSquare size={10} /> 互动</span>
                     </div>
                     <span>{kol.time}</span>
                   </div>
@@ -389,13 +398,13 @@ export default function App() {
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <Shield size={16} className="text-emerald-500" />
-              <h2 className="text-sm font-black uppercase tracking-widest">Risk Assessment</h2>
+              <h2 className="text-sm font-black uppercase tracking-widest">综合风险评估</h2>
             </div>
             <div className="space-y-4">
               {[
-                { label: 'Volatility', value: 'Medium', color: 'bg-amber-500' },
-                { label: 'Liquidity', value: 'High', color: 'bg-emerald-500' },
-                { label: 'Sentiment', value: 'Greed', color: 'bg-orange-500' },
+                { label: '市场波动率', value: '中等', color: 'bg-amber-500' },
+                { label: '流动性指数', value: '极高', color: 'bg-emerald-500' },
+                { label: '情绪指数', value: '贪婪', color: 'bg-orange-500' },
               ].map((risk, i) => (
                 <div key={i}>
                   <div className="flex justify-between text-[10px] font-bold mb-1.5 uppercase tracking-widest">
