@@ -89,8 +89,21 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiSummary, setAiSummary] = useState("Aggregating real-time data from 12 sources...");
 
-  // Initialize Gemini
-  const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }), []);
+  // Initialize Gemini safely
+  const ai = useMemo(() => {
+    try {
+      // Check if process and process.env exist before accessing
+      const apiKey = (typeof process !== 'undefined' && process.env) ? process.env.GEMINI_API_KEY : undefined;
+      if (!apiKey) {
+        console.warn("GEMINI_API_KEY not found. AI features will be disabled.");
+        return null;
+      }
+      return new GoogleGenAI({ apiKey });
+    } catch (e) {
+      console.error("Failed to initialize AI:", e);
+      return null;
+    }
+  }, []);
 
   // Simulate Live Price Updates
   useEffect(() => {
@@ -103,6 +116,10 @@ export default function App() {
 
   // AI Analysis Function
   const runAiAnalysis = async () => {
+    if (!ai) {
+      setAiSummary("AI Analysis is only available in the secure preview environment.");
+      return;
+    }
     setIsAnalyzing(true);
     try {
       const prompt = `
@@ -123,7 +140,7 @@ export default function App() {
       setAiSummary(response.text || "Analysis failed. Market remains volatile.");
     } catch (error) {
       console.error("AI Analysis Error:", error);
-      setAiSummary("Unable to connect to intelligence engine. Check API configuration.");
+      setAiSummary("Analysis unavailable. Ensure you are in the preview environment.");
     } finally {
       setIsAnalyzing(false);
     }
