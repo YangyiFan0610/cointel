@@ -36,9 +36,15 @@ import {
 } from 'recharts';
 
 // --- Types & Constants ---
+type AssetType = 'BTC' | 'ETH' | 'SPX' | 'GOLD';
+
 interface MarketData {
   time: string;
-  price: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
 interface IntelItem {
@@ -70,10 +76,18 @@ interface MacroIndicator {
 const generateChartData = (points: number): MarketData[] => {
   let basePrice = 68000;
   return Array.from({ length: points }, (_, i) => {
-    basePrice += (Math.random() - 0.5) * 400;
+    const open = basePrice;
+    const close = basePrice + (Math.random() - 0.5) * 400;
+    const high = Math.max(open, close) + Math.random() * 50;
+    const low = Math.min(open, close) - Math.random() * 50;
+    basePrice = close;
     return {
       time: `${Math.floor(i/2)}h`,
-      price: Math.floor(basePrice),
+      open,
+      high,
+      low,
+      close,
+      volume: Math.random() * 1000
     };
   });
 };
@@ -145,13 +159,61 @@ const INTEL_FEED: IntelItem[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'market' | 'intel' | 'macro' | 'prediction'>('market');
-  const [currentBtc, setCurrentBtc] = useState(68432);
-  const [chartData, setChartData] = useState(generateChartData(40));
+  const [selectedAsset, setSelectedAsset] = useState<AssetType>('BTC');
+  const [currentPrice, setCurrentPrice] = useState(68432);
+  const [chartData, setChartData] = useState<MarketData[]>([]);
   const [hoveredAnnotation, setHoveredAnnotation] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiSummary, setAiSummary] = useState("正在聚合全网实时情报...");
   const [liveIntel, setLiveIntel] = useState<IntelItem[]>(INTEL_FEED);
   const [isFetchingNews, setIsFetchingNews] = useState(false);
+  const [systemLogs, setSystemLogs] = useState<string[]>([
+    "系统初始化完成...",
+    "正在建立多市场关联模型...",
+    "已连接 Google Search Grounding 实时数据源"
+  ]);
+
+  const assetConfig: Record<AssetType, { name: string; color: string; symbol: string }> = {
+    BTC: { name: 'Bitcoin', color: '#f97316', symbol: '₿' },
+    ETH: { name: 'Ethereum', color: '#6366f1', symbol: 'Ξ' },
+    SPX: { name: 'S&P 500', color: '#10b981', symbol: 'S&P' },
+    GOLD: { name: 'Gold', color: '#eab308', symbol: 'Au' }
+  };
+
+  // Generate mock OHLC data
+  const generateOHLCData = (count: number, basePrice: number) => {
+    const data: MarketData[] = [];
+    let current = basePrice;
+    for (let i = 0; i < count; i++) {
+      const open = current;
+      const close = current + (Math.random() - 0.5) * (basePrice * 0.02);
+      const high = Math.max(open, close) + Math.random() * (basePrice * 0.005);
+      const low = Math.min(open, close) - Math.random() * (basePrice * 0.005);
+      data.push({
+        time: `${i}h`,
+        open,
+        high,
+        low,
+        close,
+        volume: Math.random() * 1000
+      });
+      current = close;
+    }
+    return data;
+  };
+
+  useEffect(() => {
+    const basePrices = { BTC: 68000, ETH: 3800, SPX: 5100, GOLD: 2150 };
+    setChartData(generateOHLCData(40, basePrices[selectedAsset]));
+    setCurrentPrice(basePrices[selectedAsset]);
+  }, [selectedAsset]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentPrice(prev => prev + (Math.random() - 0.5) * (prev * 0.001));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Initialize Gemini safely
   const ai = useMemo(() => {
@@ -173,11 +235,11 @@ export default function App() {
     setIsAnalyzing(true);
     try {
       const prompt = `
-        Search and analyze the LATEST real-time Bitcoin and global macro market state (Date: ${new Date().toISOString()}).
+        Search and analyze the LATEST real-time ${selectedAsset} and global macro market state (Date: ${new Date().toISOString()}).
         Focus on:
-        1. Current BTC price action and key technical levels.
+        1. Current ${selectedAsset} price action and key technical levels.
         2. Major macro events (Fed, DXY, US Economy).
-        3. Significant news from the last 4 hours.
+        3. Cross-market correlations (Stocks vs Crypto vs Gold).
         
         Provide a bilingual (EN/CN) executive summary. 
         Format: 
@@ -194,6 +256,7 @@ export default function App() {
       });
       
       setAiSummary(response.text || "分析失败。市场保持波动。");
+      setSystemLogs(prev => [`[${new Date().toLocaleTimeString()}] 深度分析完成: ${selectedAsset} 关联模型已更新`, ...prev.slice(0, 4)]);
     } catch (error) {
       console.error("AI Analysis Error:", error);
       setAiSummary("分析不可用。请确保在预览环境中运行。");
@@ -208,7 +271,7 @@ export default function App() {
     setIsFetchingNews(true);
     try {
       const prompt = `
-        Search for the 4 most important crypto and macro market news items from the LAST 4 HOURS.
+        Search for the 4 most important news items for ${selectedAsset} and Global Markets from the LAST 4 HOURS.
         For each item, provide:
         - Source name
         - Category (Macro, BTC, Altcoins, or On-Chain)
@@ -239,6 +302,7 @@ export default function App() {
           importance: 2
         })));
       }
+      setSystemLogs(prev => [`[${new Date().toLocaleTimeString()}] 情报库已更新: 捕获 4 条 ${selectedAsset} 相关动态`, ...prev.slice(0, 4)]);
     } catch (error) {
       console.error("News Fetch Error:", error);
     } finally {
@@ -254,11 +318,11 @@ export default function App() {
     setIsPredicting(true);
     try {
       const prompt = `
-        Perform a deep correlation and predictive analysis for Bitcoin (Date: ${new Date().toISOString()}).
+        Perform a deep correlation and predictive analysis for ${selectedAsset} (Date: ${new Date().toISOString()}).
         
-        1. Correlation Analysis: How are DXY, S&P 500, and On-chain flows currently affecting BTC?
-        2. Social Sentiment: What are the top 3 narratives on X (Twitter) and YouTube right now?
-        3. Price Probability: Based on current volatility and technicals, provide a 24h price range estimate with probability (e.g., 60% chance of $67k-$70k).
+        1. Correlation Analysis: How are DXY, S&P 500, and other assets currently affecting ${selectedAsset}?
+        2. Social Sentiment: What are the top 3 narratives on X (Twitter) and YouTube right now regarding ${selectedAsset}?
+        3. Price Probability: Based on current volatility and technicals, provide a 24h price range estimate with probability.
         4. Key "Black Swan" or "Catalyst" events to watch in the next 48h.
         
         Return the analysis as a structured JSON object with fields: 
@@ -294,13 +358,6 @@ export default function App() {
     }
   }, [ai]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentBtc(prev => prev + (Math.random() - 0.5) * 20);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
   const annotations = [
     { x: '10h', y: 68200, label: 'ETF 资金流入', desc: '机构资金大规模进场' },
     { x: '25h', y: 68500, label: 'CPI 数据公布', desc: '通胀数据低于预期，利好' },
@@ -315,10 +372,23 @@ export default function App() {
             <div className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center">
               <Zap size={14} className="text-black" />
             </div>
-            <span className="font-black text-sm tracking-tighter uppercase">BTC_Intelligence_Terminal</span>
+            <span className="font-black text-sm tracking-tighter uppercase">Multi_Market_Intelligence_Terminal</span>
           </div>
           
-          {/* Functional Tabs */}
+          {/* Asset Selector */}
+          <div className="flex bg-white/5 p-1 rounded-lg gap-1 border border-white/10">
+            {(['BTC', 'ETH', 'SPX', 'GOLD'] as AssetType[]).map((asset) => (
+              <button
+                key={asset}
+                onClick={() => setSelectedAsset(asset)}
+                className={`px-3 py-1 rounded text-[10px] font-black transition-all ${
+                  selectedAsset === asset ? 'bg-white text-black' : 'text-slate-500 hover:text-white'
+                }`}
+              >
+                {asset}
+              </button>
+            ))}
+          </div>
           <div className="flex bg-white/5 p-1 rounded-lg gap-1">
             {[
               { id: 'market', label: '市场大盘', icon: LineChartIcon },
@@ -343,17 +413,12 @@ export default function App() {
         <div className="flex items-center gap-6">
           <div className="hidden md:flex items-center gap-4 text-[11px] font-bold">
             <div className="flex flex-col items-end">
-              <span className="text-orange-500">BTC: ${currentBtc.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+              <span className="text-orange-500">{selectedAsset}: ${currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
               <span className="text-[9px] text-emerald-500">+2.45%</span>
-            </div>
-            <div className="w-px h-6 bg-white/10" />
-            <div className="flex flex-col items-end">
-              <span className="text-slate-400">ETH: $3,842.12</span>
-              <span className="text-[9px] text-emerald-500">+1.20%</span>
             </div>
           </div>
           <button className="p-2 hover:bg-white/5 rounded-lg transition-colors group" onClick={() => {
-            setChartData(generateChartData(40));
+            setChartData(generateOHLCData(40, currentPrice));
             runAiAnalysis();
             fetchLiveNews();
             runPricePrediction();
@@ -429,18 +494,18 @@ export default function App() {
                     <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#f97316" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                          <stop offset="5%" stopColor={assetConfig[selectedAsset].color} stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor={assetConfig[selectedAsset].color} stopOpacity={0}/>
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
                       <XAxis dataKey="time" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis domain={['auto', 'auto']} stroke="#475569" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val/1000}k`} />
+                      <YAxis domain={['auto', 'auto']} stroke="#475569" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val.toLocaleString()}`} />
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '12px', fontSize: '12px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)' }}
-                        itemStyle={{ color: '#f97316' }}
+                        itemStyle={{ color: assetConfig[selectedAsset].color }}
                       />
-                      <Area type="monotone" dataKey="price" stroke="#f97316" strokeWidth={3} fillOpacity={1} fill="url(#colorPrice)" />
+                      <Area type="monotone" dataKey="close" stroke={assetConfig[selectedAsset].color} strokeWidth={3} fillOpacity={1} fill="url(#colorPrice)" />
                       
                       {/* Interactive Annotations */}
                       {annotations.map((note, i) => (
@@ -449,7 +514,7 @@ export default function App() {
                           x={note.x} 
                           y={note.y} 
                           r={6} 
-                          fill="#f97316" 
+                          fill={assetConfig[selectedAsset].color} 
                           stroke="#fff" 
                           strokeWidth={2}
                           className="cursor-pointer hover:scale-150 transition-transform"
@@ -773,16 +838,32 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* Footer / Ticker */}
-      <footer className="h-10 border-t border-white/5 bg-[#0A0B0D] flex items-center px-6 fixed bottom-0 w-full z-50 overflow-hidden">
-        <div className="flex animate-[marquee_25s_linear_infinite] gap-12 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-          <span>BTC: $68,432 (+2.4%)</span>
-          <span>ETH: $3,845 (+1.8%)</span>
-          <span>SOL: $145 (-0.5%)</span>
-          <span>BNB: $592 (+0.2%)</span>
-          <span>XRP: $0.62 (+1.1%)</span>
-          <span>ADA: $0.45 (-2.3%)</span>
-          <span>DOGE: $0.16 (+5.4%)</span>
+      {/* Footer / Ticker & System Logs */}
+      <footer className="h-10 border-t border-white/5 bg-[#0A0B0D] flex items-center justify-between px-6 fixed bottom-0 w-full z-50 overflow-hidden">
+        <div className="flex-1 overflow-hidden">
+          <div className="flex animate-[marquee_25s_linear_infinite] gap-12 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+            <span>BTC: $68,432 (+2.4%)</span>
+            <span>ETH: $3,845 (+1.8%)</span>
+            <span>SPX: 5,123 (+0.4%)</span>
+            <span>GOLD: $2,154 (+0.2%)</span>
+            <span>DXY: 103.4 (-0.1%)</span>
+            <span>US10Y: 4.21% (+0.5%)</span>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-4 bg-black/80 px-4 h-full border-l border-white/10">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">System Autonomy Active</span>
+          </div>
+          <div className="h-4 w-px bg-white/10" />
+          <div className="flex gap-3 overflow-hidden max-w-[300px]">
+            {systemLogs.map((log, i) => (
+              <span key={i} className="text-[9px] text-slate-600 whitespace-nowrap animate-in slide-in-from-bottom-1">
+                {log}
+              </span>
+            ))}
+          </div>
         </div>
       </footer>
 
