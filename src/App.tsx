@@ -1,265 +1,433 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  LayoutDashboard, 
-  Globe, 
-  Server, 
-  Database, 
-  BrainCircuit, 
-  CreditCard, 
+  TrendingUp, 
+  TrendingDown, 
+  Activity, 
+  Twitter, 
+  Zap, 
+  Shield, 
+  BarChart3, 
+  Clock, 
   Search, 
-  Bell, 
-  User,
+  RefreshCw,
+  AlertTriangle,
+  MessageSquare,
+  Globe,
   ArrowUpRight,
-  Plus,
-  ExternalLink,
-  ChevronRight,
-  ShieldCheck,
-  Zap
+  ArrowDownRight,
+  Cpu
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  AreaChart, 
+  Area 
+} from 'recharts';
+import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from "@google/genai";
 
-const SERVICES = [
-  {
-    id: 'domain',
-    name: 'Domain Names',
-    icon: Globe,
-    description: 'Register your brand identity with premium TLDs.',
-    price: 'From $9.99/yr',
-    status: 'Available',
-    color: 'text-blue-600',
-    bg: 'bg-blue-50'
-  },
-  {
-    id: 'hosting',
-    name: 'Cloud Hosting',
-    icon: Server,
-    description: 'High-performance edge hosting for your web apps.',
-    price: 'From $5.00/mo',
-    status: 'Active',
-    color: 'text-purple-600',
-    bg: 'bg-purple-50'
-  },
-  {
-    id: 'database',
-    name: 'Managed DB',
-    icon: Database,
-    description: 'Scalable SQL & NoSQL databases with auto-backup.',
-    price: 'From $12.00/mo',
-    status: 'Provisioned',
-    color: 'text-emerald-600',
-    bg: 'bg-emerald-50'
-  },
-  {
-    id: 'ai',
-    name: 'AI APIs',
-    icon: BrainCircuit,
-    description: 'Access Gemini, GPT-4, and Claude via unified API.',
-    price: 'Pay as you go',
-    status: 'Ready',
-    color: 'text-amber-600',
-    bg: 'bg-amber-50'
-  }
+// --- Types & Constants ---
+interface MarketData {
+  time: string;
+  price: number;
+  volume: number;
+}
+
+interface KOLComment {
+  id: string;
+  author: string;
+  handle: string;
+  content: string;
+  time: string;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+}
+
+interface InstitutionalSignal {
+  source: string;
+  signal: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number;
+  summary: string;
+}
+
+// Mock Data Generators
+const generateChartData = (points: number): MarketData[] => {
+  let basePrice = 68400;
+  return Array.from({ length: points }, (_, i) => {
+    basePrice += (Math.random() - 0.5) * 200;
+    return {
+      time: `${12 + Math.floor(i/5)}:${(i*12)%60}`,
+      price: Math.floor(basePrice),
+      volume: Math.floor(Math.random() * 5000 + 2000)
+    };
+  });
+};
+
+const MOCK_KOLS: KOLComment[] = [
+  { id: '1', author: 'PlanB', handle: '@100trillionUSD', content: 'S2F model still on track. BTC scarcity is the ultimate driver. Patience is key.', time: '2m ago', sentiment: 'bullish' },
+  { id: '2', author: 'Peter Schiff', handle: '@PeterSchiff', content: 'Bitcoin is a digital bubble. Gold is the only real store of value. Get out while you can.', time: '15m ago', sentiment: 'bearish' },
+  { id: '3', author: 'Willy Woo', handle: '@woonomic', content: 'On-chain data shows massive accumulation by whales. Exchange balances hitting multi-year lows.', time: '34m ago', sentiment: 'bullish' },
+  { id: '4', author: 'Glassnode', handle: '@glassnode', content: 'Realized cap reaching new ATHs. Market structure remains robust despite short-term volatility.', time: '1h ago', sentiment: 'neutral' },
 ];
 
-const RECENT_ACTIVITY = [
-  { id: 1, action: 'Domain registered', target: 'startup-alpha.com', time: '2h ago' },
-  { id: 2, action: 'Database backup', target: 'prod-db-01', time: '5h ago' },
-  { id: 3, action: 'API Key generated', target: 'Gemini Pro', time: '1d ago' },
+const MOCK_INSTITUTIONS: InstitutionalSignal[] = [
+  { source: 'Goldman Sachs', signal: 'HOLD', confidence: 65, summary: 'Macro headwinds persist, but institutional adoption provides a floor.' },
+  { source: 'BlackRock', signal: 'BUY', confidence: 88, summary: 'ETF inflows accelerating. Spot demand outstripping supply.' },
+  { source: 'J.P. Morgan', signal: 'SELL', confidence: 42, summary: 'Short-term overbought signals on technical indicators.' },
 ];
+
+// --- Components ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [priceData, setPriceData] = useState<MarketData[]>(generateChartData(30));
+  const [currentPrice, setCurrentPrice] = useState(68432);
+  const [priceChange, setPriceChange] = useState(2.4);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiSummary, setAiSummary] = useState("Aggregating real-time data from 12 sources...");
+
+  // Initialize Gemini
+  const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }), []);
+
+  // Simulate Live Price Updates
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const delta = (Math.random() - 0.5) * 50;
+      setCurrentPrice(prev => Math.floor(prev + delta));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // AI Analysis Function
+  const runAiAnalysis = async () => {
+    setIsAnalyzing(true);
+    try {
+      const prompt = `
+        Analyze the current Bitcoin market state based on these inputs:
+        - Price: $${currentPrice}
+        - KOL Sentiment: PlanB (Bullish), Peter Schiff (Bearish), Willy Woo (Bullish)
+        - Institutional Signals: BlackRock (Buy), Goldman (Hold), JPM (Sell)
+        
+        Provide a 2-sentence "Executive Summary" for an individual investor. 
+        Be direct, concise, and highlight the most critical signal.
+      `;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+      
+      setAiSummary(response.text || "Analysis failed. Market remains volatile.");
+    } catch (error) {
+      console.error("AI Analysis Error:", error);
+      setAiSummary("Unable to connect to intelligence engine. Check API configuration.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  useEffect(() => {
+    runAiAnalysis();
+  }, []);
 
   return (
-    <div className="min-h-screen bg-[#F8F9FB] text-slate-900 font-sans flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col hidden lg:flex">
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-            <Zap className="text-white w-5 h-5" />
-          </div>
-          <span className="font-bold text-xl tracking-tight">Cointel</span>
-        </div>
-
-        <nav className="flex-1 px-4 py-4 space-y-1">
-          {[
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-            { id: 'services', icon: Globe, label: 'Services' },
-            { id: 'billing', icon: CreditCard, label: 'Billing' },
-            { id: 'settings', icon: User, label: 'Account' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
-                activeTab === item.id 
-                  ? 'bg-indigo-50 text-indigo-600' 
-                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <item.icon size={18} />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="p-4 mt-auto">
-          <div className="bg-slate-900 rounded-2xl p-4 text-white">
-            <p className="text-xs font-medium text-slate-400 mb-1">Current Plan</p>
-            <p className="text-sm font-bold mb-3">Startup Pro</p>
-            <div className="w-full bg-slate-800 h-1.5 rounded-full mb-4">
-              <div className="bg-indigo-500 h-full w-3/4 rounded-full" />
+    <div className="min-h-screen bg-[#0A0B0D] text-slate-100 font-mono selection:bg-indigo-500/30">
+      {/* Top Navigation / Status Bar */}
+      <nav className="h-14 border-b border-white/5 bg-[#0A0B0D]/80 backdrop-blur-xl flex items-center justify-between px-6 sticky top-0 z-50">
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center">
+              <TrendingUp size={14} className="text-black" />
             </div>
-            <button className="w-full py-2 bg-white text-slate-900 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors">
-              Upgrade
-            </button>
+            <span className="font-black text-sm tracking-tighter">BTC_INTEL_v1.0</span>
+          </div>
+          <div className="h-4 w-px bg-white/10" />
+          <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+            <span className="flex items-center gap-1.5"><Activity size={12} className="text-emerald-500" /> System Live</span>
+            <span className="flex items-center gap-1.5"><Clock size={12} /> {new Date().toLocaleTimeString()}</span>
           </div>
         </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
-          <div className="flex items-center gap-4 flex-1">
-            <div className="relative max-w-md w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input 
-                type="text" 
-                placeholder="Search services, domains..." 
-                className="w-full pl-10 pr-4 py-2 bg-slate-100 border-transparent focus:bg-white focus:border-indigo-500 rounded-xl text-sm transition-all outline-none"
-              />
-            </div>
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+            <input 
+              type="text" 
+              placeholder="Search assets..." 
+              className="bg-white/5 border border-white/10 rounded-lg pl-9 pr-4 py-1.5 text-xs outline-none focus:border-orange-500/50 transition-all"
+            />
           </div>
-          <div className="flex items-center gap-4">
-            <button className="p-2 text-slate-400 hover:text-slate-900 transition-colors relative">
-              <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white" />
-            </button>
-            <div className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300 overflow-hidden">
-              <img src="https://picsum.photos/seed/user/100/100" alt="Avatar" referrerPolicy="no-referrer" />
-            </div>
-          </div>
-        </header>
+          <button className="p-2 hover:bg-white/5 rounded-lg transition-colors">
+            <RefreshCw size={16} className="text-slate-400" />
+          </button>
+        </div>
+      </nav>
 
-        {/* Dashboard View */}
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-6xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900">Welcome back, Founder</h1>
-                <p className="text-slate-500 text-sm">Here is what is happening with your startup today.</p>
+      <main className="p-6 grid grid-cols-12 gap-6 max-w-[1600px] mx-auto">
+        
+        {/* Left Column: Market Data & Chart */}
+        <div className="col-span-12 lg:col-span-8 space-y-6">
+          
+          {/* Price Header */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-8 flex flex-wrap items-end justify-between gap-8">
+            <div>
+              <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">
+                <Globe size={14} /> Bitcoin / USD (Spot)
               </div>
-              <button className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20">
-                <Plus size={18} />
-                New Project
-              </button>
+              <div className="flex items-baseline gap-4">
+                <h1 className="text-6xl font-black tracking-tighter">
+                  ${currentPrice.toLocaleString()}
+                </h1>
+                <div className={`flex items-center gap-1 text-lg font-bold ${priceChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {priceChange >= 0 ? <ArrowUpRight size={20} /> : <ArrowDownRight size={20} />}
+                  {priceChange}%
+                </div>
+              </div>
             </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {[
-                { label: 'Total Spend', value: '$124.50', change: '+12%', icon: CreditCard, color: 'text-blue-600' },
-                { label: 'Active Services', value: '12', change: '0', icon: Server, color: 'text-purple-600' },
-                { label: 'Uptime', value: '99.98%', change: '+0.01%', icon: ShieldCheck, color: 'text-emerald-600' },
-                { label: 'API Requests', value: '45.2k', change: '+24%', icon: BrainCircuit, color: 'text-amber-600' },
-              ].map((stat, i) => (
-                <motion.div 
-                  key={i}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"
-                >
-                  <div className="flex items-center justify-between mb-4">
-                    <div className={`p-2 rounded-lg bg-slate-50 ${stat.color}`}>
-                      <stat.icon size={20} />
-                    </div>
-                    <span className={`text-xs font-bold ${stat.change.startsWith('+') ? 'text-emerald-600' : 'text-slate-400'}`}>
-                      {stat.change}
-                    </span>
-                  </div>
-                  <p className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-1">{stat.label}</p>
-                  <p className="text-2xl font-bold text-slate-900">{stat.value}</p>
-                </motion.div>
-              ))}
+            <div className="grid grid-cols-3 gap-8 border-l border-white/10 pl-8">
+              <div>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">24h High</p>
+                <p className="text-sm font-bold">$69,120</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">24h Low</p>
+                <p className="text-sm font-bold">$67,840</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Volume</p>
+                <p className="text-sm font-bold">2.4B</p>
+              </div>
             </div>
+          </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Main Services */}
-              <div className="lg:col-span-2 space-y-6">
-                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  Essential Services
-                  <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">4 Available</span>
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {SERVICES.map((service, i) => (
-                    <motion.div 
-                      key={service.id}
-                      whileHover={{ y: -4 }}
-                      className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer group"
-                    >
-                      <div className="flex items-start justify-between mb-4">
-                        <div className={`p-3 rounded-xl ${service.bg} ${service.color}`}>
-                          <service.icon size={24} />
-                        </div>
-                        <div className="bg-slate-50 text-slate-400 p-1.5 rounded-lg group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                          <ArrowUpRight size={16} />
-                        </div>
-                      </div>
-                      <h3 className="font-bold text-slate-900 mb-1">{service.name}</h3>
-                      <p className="text-slate-500 text-xs leading-relaxed mb-4">{service.description}</p>
-                      <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                        <span className="text-sm font-bold text-slate-900">{service.price}</span>
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">{service.status}</span>
-                      </div>
-                    </motion.div>
+          {/* Main Chart */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 h-[450px]">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <h2 className="text-sm font-black uppercase tracking-widest">Price Action</h2>
+                <div className="flex bg-white/5 p-1 rounded-lg">
+                  {['1H', '4H', '1D', '1W'].map(t => (
+                    <button key={t} className={`px-3 py-1 text-[10px] font-bold rounded-md transition-colors ${t === '1H' ? 'bg-orange-500 text-black' : 'text-slate-500 hover:text-white'}`}>
+                      {t}
+                    </button>
                   ))}
                 </div>
               </div>
-
-              {/* Sidebar Info */}
-              <div className="space-y-8">
-                {/* Activity */}
-                <section>
-                  <h2 className="text-lg font-bold text-slate-900 mb-4">Recent Activity</h2>
-                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    {RECENT_ACTIVITY.map((item, i) => (
-                      <div key={item.id} className={`p-4 flex items-center justify-between ${i !== RECENT_ACTIVITY.length - 1 ? 'border-b border-slate-100' : ''}`}>
-                        <div>
-                          <p className="text-sm font-bold text-slate-900">{item.action}</p>
-                          <p className="text-xs text-slate-500">{item.target}</p>
-                        </div>
-                        <span className="text-[10px] font-medium text-slate-400">{item.time}</span>
-                      </div>
-                    ))}
-                    <button className="w-full py-3 text-xs font-bold text-indigo-600 hover:bg-indigo-50 transition-colors flex items-center justify-center gap-1">
-                      View All <ChevronRight size={14} />
-                    </button>
-                  </div>
-                </section>
-
-                {/* Quick Links */}
-                <section>
-                  <h2 className="text-lg font-bold text-slate-900 mb-4">Quick Links</h2>
-                  <div className="space-y-3">
-                    {[
-                      { label: 'API Documentation', icon: ExternalLink },
-                      { label: 'Community Support', icon: ExternalLink },
-                      { label: 'System Status', icon: ShieldCheck },
-                    ].map((link, i) => (
-                      <button key={i} className="w-full flex items-center justify-between p-4 bg-white rounded-xl border border-slate-200 hover:border-indigo-300 transition-all group">
-                        <span className="text-sm font-medium text-slate-600 group-hover:text-indigo-600">{link.label}</span>
-                        <link.icon size={14} className="text-slate-400 group-hover:text-indigo-600" />
-                      </button>
-                    ))}
-                  </div>
-                </section>
+              <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                <div className="w-2 h-2 bg-orange-500 rounded-full" /> Live Feed
               </div>
             </div>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={priceData}>
+                <defs>
+                  <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                <XAxis 
+                  dataKey="time" 
+                  stroke="#475569" 
+                  fontSize={10} 
+                  tickLine={false} 
+                  axisLine={false}
+                  interval={5}
+                />
+                <YAxis 
+                  domain={['auto', 'auto']} 
+                  stroke="#475569" 
+                  fontSize={10} 
+                  tickLine={false} 
+                  axisLine={false}
+                  tickFormatter={(val) => `$${val/1000}k`}
+                />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '12px' }}
+                  itemStyle={{ color: '#f97316' }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="price" 
+                  stroke="#f97316" 
+                  strokeWidth={2}
+                  fillOpacity={1} 
+                  fill="url(#colorPrice)" 
+                  animationDuration={1000}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Institutional Signals */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {MOCK_INSTITUTIONS.map((inst, i) => (
+              <div key={i} className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-all group">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{inst.source}</span>
+                  <div className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                    inst.signal === 'BUY' ? 'bg-emerald-500/10 text-emerald-500' : 
+                    inst.signal === 'SELL' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-500/10 text-slate-500'
+                  }`}>
+                    {inst.signal}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed mb-4">{inst.summary}</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-600 font-bold">Confidence</span>
+                  <div className="w-24 h-1 bg-white/5 rounded-full overflow-hidden">
+                    <div className="bg-orange-500 h-full" style={{ width: `${inst.confidence}%` }} />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
+
+        {/* Right Column: AI Intelligence & KOL Feed */}
+        <div className="col-span-12 lg:col-span-4 space-y-6">
+          
+          {/* AI Intelligence Terminal */}
+          <div className="bg-indigo-600 rounded-2xl p-6 text-white relative overflow-hidden shadow-2xl shadow-indigo-500/20">
+            <div className="relative z-10">
+              <div className="flex items-center gap-2 mb-4">
+                <Cpu size={20} className="animate-pulse" />
+                <h2 className="text-sm font-black uppercase tracking-widest">AI Intelligence Engine</h2>
+              </div>
+              <div className="bg-black/20 backdrop-blur-md rounded-xl p-4 border border-white/10 min-h-[100px] flex flex-col justify-center">
+                {isAnalyzing ? (
+                  <div className="flex items-center gap-3 text-sm font-bold">
+                    <RefreshCw size={16} className="animate-spin" />
+                    Processing market signals...
+                  </div>
+                ) : (
+                  <p className="text-sm font-bold leading-relaxed italic">
+                    "{aiSummary}"
+                  </p>
+                )}
+              </div>
+              <button 
+                onClick={runAiAnalysis}
+                disabled={isAnalyzing}
+                className="mt-4 w-full py-2 bg-white text-indigo-600 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-slate-100 transition-all disabled:opacity-50"
+              >
+                Refresh Analysis
+              </button>
+            </div>
+            <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
+          </div>
+
+          {/* KOL / Twitter Feed */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl flex flex-col h-[700px]">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Twitter size={18} className="text-sky-400" />
+                <h2 className="text-sm font-black uppercase tracking-widest">KOL Pulse</h2>
+              </div>
+              <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded">Live Feed</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+              {MOCK_KOLS.map((kol) => (
+                <motion.div 
+                  key={kol.id}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-4 bg-white/5 rounded-xl border border-transparent hover:border-white/10 transition-all group"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold">
+                        {kol.author[0]}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold">{kol.author}</p>
+                        <p className="text-[10px] text-slate-500">{kol.handle}</p>
+                      </div>
+                    </div>
+                    <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
+                      kol.sentiment === 'bullish' ? 'bg-emerald-500/10 text-emerald-500' : 
+                      kol.sentiment === 'bearish' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-500/10 text-slate-500'
+                    }`}>
+                      {kol.sentiment}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed mb-3">
+                    {kol.content}
+                  </p>
+                  <div className="flex items-center justify-between text-[9px] font-bold text-slate-600">
+                    <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-1 hover:text-sky-400 cursor-pointer"><MessageSquare size={10} /> 12</span>
+                      <span className="flex items-center gap-1 hover:text-emerald-400 cursor-pointer"><RefreshCw size={10} /> 45</span>
+                    </div>
+                    <span>{kol.time}</span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
+          {/* Risk Indicator */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Shield size={16} className="text-emerald-500" />
+              <h2 className="text-sm font-black uppercase tracking-widest">Risk Assessment</h2>
+            </div>
+            <div className="space-y-4">
+              {[
+                { label: 'Volatility', value: 'Medium', color: 'bg-amber-500' },
+                { label: 'Liquidity', value: 'High', color: 'bg-emerald-500' },
+                { label: 'Sentiment', value: 'Greed', color: 'bg-orange-500' },
+              ].map((risk, i) => (
+                <div key={i}>
+                  <div className="flex justify-between text-[10px] font-bold mb-1.5 uppercase tracking-widest">
+                    <span className="text-slate-500">{risk.label}</span>
+                    <span className="text-slate-300">{risk.value}</span>
+                  </div>
+                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                    <div className={`${risk.color} h-full w-2/3`} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
       </main>
+
+      {/* Footer / Ticker */}
+      <footer className="h-10 border-t border-white/5 bg-[#0A0B0D] flex items-center px-6 fixed bottom-0 w-full z-50 overflow-hidden">
+        <div className="flex animate-[marquee_20s_linear_infinite] gap-12 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+          <span>BTC: $68,432 (+2.4%)</span>
+          <span>ETH: $3,845 (+1.8%)</span>
+          <span>SOL: $145 (-0.5%)</span>
+          <span>BNB: $592 (+0.2%)</span>
+          <span>XRP: $0.62 (+1.1%)</span>
+          <span>ADA: $0.45 (-2.3%)</span>
+          <span>DOGE: $0.16 (+5.4%)</span>
+        </div>
+      </footer>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.1);
+        }
+      `}} />
     </div>
   );
 }

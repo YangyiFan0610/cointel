@@ -1,5 +1,5 @@
 {
-  "name": "Startup Dashboard",
-  "description": "A comprehensive visual dashboard to quickly access and purchase essential services for launching your startup, including domains, hosting, databases, and AI APIs.",
+  "name": "BTC Intelligence Terminal",
+  "description": "A high-density, real-time Bitcoin market intelligence dashboard aggregating data from institutions and KOLs with AI-powered sentiment analysis.",
   "requestFramePermissions": []
 }
