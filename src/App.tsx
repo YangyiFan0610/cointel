@@ -25,38 +25,52 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  AreaChart, 
-  Area, 
+  ComposedChart,
+  Bar,
+  Line,
   XAxis, 
   YAxis, 
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  ReferenceDot
+  ReferenceDot,
+  Cell
 } from 'recharts';
 
 // --- Types & Constants ---
 type AssetType = 'BTC' | 'ETH' | 'SPX' | 'GOLD';
+type Timeframe = '1h' | '4h' | '1d';
 
 interface MarketData {
   time: string;
+  timestamp: number;
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
+  events?: MarketEvent[];
+}
+
+interface MarketEvent {
+  id: string;
+  type: 'news' | 'whale' | 'macro' | 'technical';
+  title: string;
+  description: string;
+  impact: 'bullish' | 'bearish' | 'neutral';
 }
 
 interface IntelItem {
   id: string;
   source: string;
-  category: 'Macro' | 'BTC' | 'Altcoins' | 'On-Chain';
+  category: 'Macro' | 'Institutional' | 'Technical' | 'Narrative';
   titleEn: string;
   titleCn: string;
   contentEn: string;
   contentCn: string;
   time: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
+  impactScore?: number;
   mediaUrl?: string;
   videoUrl?: string;
   importance: 1 | 2 | 3;
@@ -73,21 +87,46 @@ interface MacroIndicator {
 }
 
 // --- Mock Data ---
-const generateChartData = (points: number): MarketData[] => {
-  let basePrice = 68000;
+const generateChartData = (points: number, basePrice: number, timeframe: Timeframe): MarketData[] => {
+  let currentPrice = basePrice;
+  const now = Date.now();
+  const step = timeframe === '1h' ? 3600000 : timeframe === '4h' ? 14400000 : 86400000;
+
   return Array.from({ length: points }, (_, i) => {
-    const open = basePrice;
-    const close = basePrice + (Math.random() - 0.5) * 400;
-    const high = Math.max(open, close) + Math.random() * 50;
-    const low = Math.min(open, close) - Math.random() * 50;
-    basePrice = close;
+    const open = currentPrice;
+    const volatility = basePrice * 0.01;
+    const close = currentPrice + (Math.random() - 0.5) * volatility;
+    const high = Math.max(open, close) + Math.random() * (volatility * 0.5);
+    const low = Math.min(open, close) - Math.random() * (volatility * 0.5);
+    currentPrice = close;
+
+    const timestamp = now - (points - i) * step;
+    const date = new Date(timestamp);
+    const timeStr = timeframe === '1d' 
+      ? `${date.getMonth() + 1}/${date.getDate()}`
+      : `${date.getHours()}:00`;
+
+    // Randomly inject events
+    const events: MarketEvent[] = [];
+    if (Math.random() > 0.85) {
+      events.push({
+        id: `evt-${i}`,
+        type: Math.random() > 0.5 ? 'news' : 'whale',
+        title: '关键市场异动',
+        description: '在该时段内观察到显著的资金流向或新闻发布。',
+        impact: close > open ? 'bullish' : 'bearish'
+      });
+    }
+
     return {
-      time: `${Math.floor(i/2)}h`,
+      time: timeStr,
+      timestamp,
       open,
       high,
       low,
       close,
-      volume: Math.random() * 1000
+      volume: Math.random() * 1000,
+      events
     };
   });
 };
@@ -102,56 +141,45 @@ const MACRO_INDICATORS: MacroIndicator[] = [
 const INTEL_FEED: IntelItem[] = [
   {
     id: '1',
-    source: 'Federal Reserve (联准会)',
+    source: 'Bloomberg Terminal',
     category: 'Macro',
-    titleEn: 'Fed Chair Powell Hints at "Higher for Longer" Interest Rates',
-    titleCn: '美联储主席鲍威尔暗示利率将“在更长时间内保持高位”',
-    contentEn: 'Recent inflation data has been stickier than expected, suggesting that the path to 2% inflation will be bumpy.',
-    contentCn: '近期通胀数据比预期更具粘性，表明通向 2% 通胀目标的道路将是坎坷的。',
+    titleEn: 'Fed Officials Signal Caution on Rate Cut Timing',
+    titleCn: '美联储官员对降息时机表示谨慎',
+    contentEn: 'Several FOMC members emphasize need for more evidence of inflation cooling before pivot.',
+    contentCn: '多位美联储官员强调，在转向之前需要更多通胀降温的证据。',
     time: '12m ago',
     sentiment: 'bearish',
+    impactScore: 8,
     importance: 3,
     mediaUrl: 'https://picsum.photos/seed/fed/800/400'
   },
   {
     id: '2',
-    source: 'Glassnode (链上分析)',
-    category: 'On-Chain',
-    titleEn: 'Bitcoin Exchange Outflows Reach 3-Year High',
-    titleCn: '比特币交易所流出量创 3 年新高',
-    contentEn: 'Over 50,000 BTC moved to cold storage in the last 24 hours, indicating strong long-term conviction.',
-    contentCn: '过去 24 小时内有超过 50,000 枚 BTC 转移到冷钱包，显示出强劲的长期持有信心。',
+    source: 'Reuters',
+    category: 'Institutional',
+    titleEn: 'BlackRock Bitcoin ETF Sees Record Daily Inflow',
+    titleCn: '贝莱德比特币 ETF 创下每日资金流入纪录',
+    contentEn: 'IBIT captures $788M in a single day, signaling strong institutional appetite.',
+    contentCn: 'IBIT 单日吸金 7.88 亿美元，显示出机构的强劲胃口。',
     time: '45m ago',
     sentiment: 'bullish',
-    importance: 2,
-    mediaUrl: 'https://picsum.photos/seed/chart/800/400'
+    impactScore: 9,
+    importance: 3,
+    mediaUrl: 'https://picsum.photos/seed/blackrock/800/400'
   },
   {
     id: '3',
-    source: 'Coin Bureau (YouTube)',
-    category: 'Altcoins',
-    titleEn: 'Ethereum Dencun Upgrade: What You Need to Know',
-    titleCn: '以太坊 Dencun 升级：你需要知道的一切',
-    contentEn: 'The upcoming upgrade will significantly reduce L2 transaction costs through EIP-4844.',
-    contentCn: '即将到来的升级将通过 EIP-4844 显著降低 L2 交易成本。',
-    time: '2h ago',
-    sentiment: 'bullish',
+    source: 'CoinDesk',
+    category: 'Technical',
+    titleEn: 'Bitcoin RSI Enters Overbought Territory on Daily Chart',
+    titleCn: '比特币日线图 RSI 进入超买区域',
+    contentEn: 'Momentum oscillators suggest potential short-term consolidation after recent rally.',
+    contentCn: '动量指标显示在近期上涨后可能出现短期盘整。',
+    time: '1h ago',
+    sentiment: 'neutral',
+    impactScore: 6,
     importance: 2,
-    videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    mediaUrl: 'https://picsum.photos/seed/eth/800/400'
-  },
-  {
-    id: '4',
-    source: 'Donald Trump (Truth Social)',
-    category: 'Macro',
-    titleEn: 'Trump Pledges to Support US Bitcoin Mining Industry',
-    titleCn: '特朗普承诺支持美国比特币采矿业',
-    contentEn: "We want all the remaining Bitcoin to be made in the USA!!! It will help us be ENERGY DOMINANT!!!",
-    contentCn: "我们希望所有剩余的比特币都在美国制造！！！这将帮助我们实现能源主导地位！！！",
-    time: '4h ago',
-    sentiment: 'bullish',
-    importance: 3,
-    mediaUrl: 'https://picsum.photos/seed/trump/800/400'
+    mediaUrl: 'https://picsum.photos/seed/chart/800/400'
   }
 ];
 
@@ -160,8 +188,10 @@ const INTEL_FEED: IntelItem[] = [
 export default function App() {
   const [activeTab, setActiveTab] = useState<'market' | 'intel' | 'macro' | 'prediction'>('market');
   const [selectedAsset, setSelectedAsset] = useState<AssetType>('BTC');
+  const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [currentPrice, setCurrentPrice] = useState(68432);
   const [chartData, setChartData] = useState<MarketData[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<MarketEvent | null>(null);
   const [hoveredAnnotation, setHoveredAnnotation] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiSummary, setAiSummary] = useState("正在聚合全网实时情报...");
@@ -181,32 +211,15 @@ export default function App() {
   };
 
   // Generate mock OHLC data
-  const generateOHLCData = (count: number, basePrice: number) => {
-    const data: MarketData[] = [];
-    let current = basePrice;
-    for (let i = 0; i < count; i++) {
-      const open = current;
-      const close = current + (Math.random() - 0.5) * (basePrice * 0.02);
-      const high = Math.max(open, close) + Math.random() * (basePrice * 0.005);
-      const low = Math.min(open, close) - Math.random() * (basePrice * 0.005);
-      data.push({
-        time: `${i}h`,
-        open,
-        high,
-        low,
-        close,
-        volume: Math.random() * 1000
-      });
-      current = close;
-    }
-    return data;
+  const generateOHLCData = (count: number, basePrice: number, tf: Timeframe) => {
+    return generateChartData(count, basePrice, tf);
   };
 
   useEffect(() => {
     const basePrices = { BTC: 68000, ETH: 3800, SPX: 5100, GOLD: 2150 };
-    setChartData(generateOHLCData(40, basePrices[selectedAsset]));
+    setChartData(generateOHLCData(40, basePrices[selectedAsset], timeframe));
     setCurrentPrice(basePrices[selectedAsset]);
-  }, [selectedAsset]);
+  }, [selectedAsset, timeframe]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -235,16 +248,20 @@ export default function App() {
     setIsAnalyzing(true);
     try {
       const prompt = `
-        Search and analyze the LATEST real-time ${selectedAsset} and global macro market state (Date: ${new Date().toISOString()}).
-        Focus on:
-        1. Current ${selectedAsset} price action and key technical levels.
-        2. Major macro events (Fed, DXY, US Economy).
-        3. Cross-market correlations (Stocks vs Crypto vs Gold).
+        You are a Senior Market Strategist at a top-tier investment bank. 
+        Perform a professional, high-density analysis of ${selectedAsset} and global macro conditions (Date: ${new Date().toISOString()}).
         
-        Provide a bilingual (EN/CN) executive summary. 
+        Focus on:
+        1. Causal Relationships: How specific macro events (Fed, CPI, Geopolitics) are directly impacting ${selectedAsset}'s price action.
+        2. Technical Confluence: Key support/resistance zones, RSI/MACD signals, and volume profile.
+        3. Institutional Sentiment: ETF flows, whale movements, and professional positioning.
+        
+        Provide a bilingual (EN/CN) executive summary that is concise, data-driven, and actionable.
+        Avoid generic advice. Use professional terminology.
+        
         Format: 
-        [EN] One sharp sentence on the most critical signal.
-        [CN] 一句精准的中文核心信号总结。
+        [EN] One sharp, high-density sentence on the most critical market signal.
+        [CN] 一句专业、高信息密度的核心市场信号总结。
       `;
       
       const response = await ai.models.generateContent({
@@ -271,15 +288,18 @@ export default function App() {
     setIsFetchingNews(true);
     try {
       const prompt = `
-        Search for the 4 most important news items for ${selectedAsset} and Global Markets from the LAST 4 HOURS.
+        Act as a Bloomberg Terminal news aggregator. 
+        Search for the 4 most critical, market-moving news items for ${selectedAsset} and Global Macro from the LAST 4 HOURS.
+        
         For each item, provide:
-        - Source name
-        - Category (Macro, BTC, Altcoins, or On-Chain)
-        - Title in English
-        - Title in Chinese
-        - Content in English (max 20 words)
-        - Content in Chinese (max 30 words)
-        - Sentiment (bullish, bearish, or neutral)
+        - Source: Professional news source (e.g., Reuters, Bloomberg, Coindesk).
+        - Category: Macro, Institutional, Technical, or Narrative.
+        - TitleEn: Professional headline in English.
+        - TitleCn: Professional headline in Chinese.
+        - ContentEn: Concise summary (max 15 words).
+        - ContentCn: Concise summary (max 25 words).
+        - Sentiment: bullish, bearish, or neutral.
+        - ImpactScore: 1-10 (how much this affects price).
         
         Return ONLY a JSON array of objects.
       `;
@@ -418,7 +438,7 @@ export default function App() {
             </div>
           </div>
           <button className="p-2 hover:bg-white/5 rounded-lg transition-colors group" onClick={() => {
-            setChartData(generateOHLCData(40, currentPrice));
+            setChartData(generateChartData(40, currentPrice, timeframe));
             runAiAnalysis();
             fetchLiveNews();
             runPricePrediction();
@@ -473,79 +493,194 @@ export default function App() {
                     <p className="text-xs text-slate-500 mt-1">点击图表上的标记点查看重大市场事件</p>
                   </div>
                   <div className="flex gap-2">
-                    {['1H', '4H', '1D', '1W'].map(t => (
-                      <button key={t} className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${t === '1H' ? 'bg-white text-black' : 'text-slate-500 hover:text-white'}`}>
-                        {t}
+                    {(['1h', '4h', '1d'] as Timeframe[]).map(t => (
+                      <button 
+                        key={t} 
+                        onClick={() => setTimeframe(t)}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${timeframe === t ? 'bg-white text-black' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        {t.toUpperCase()}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <div className="h-[450px] relative">
-                  {/* Annotation Tooltip Overlay */}
-                  {hoveredAnnotation && (
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-orange-500 text-black px-4 py-2 rounded-lg shadow-2xl animate-in fade-in zoom-in duration-200">
-                      <p className="text-[10px] font-black uppercase">市场事件</p>
-                      <p className="text-sm font-bold">{hoveredAnnotation}</p>
-                    </div>
-                  )}
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                  <div className="lg:col-span-3 h-[450px] relative">
+                    {/* Event Detail Overlay */}
+                    {selectedEvent && (
+                      <motion.div 
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="absolute top-4 right-4 z-30 w-64 bg-black/90 border border-white/10 p-4 rounded-xl shadow-2xl backdrop-blur-md"
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                            selectedEvent.impact === 'bullish' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'
+                          }`}>
+                            {selectedEvent.type}
+                          </span>
+                          <button onClick={() => setSelectedEvent(null)} className="text-slate-500 hover:text-white">
+                            <RefreshCw size={12} className="rotate-45" />
+                          </button>
+                        </div>
+                        <h4 className="text-sm font-bold text-white mb-1">{selectedEvent.title}</h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">{selectedEvent.description}</p>
+                      </motion.div>
+                    )}
 
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData}>
-                      <defs>
-                        <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={assetConfig[selectedAsset].color} stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor={assetConfig[selectedAsset].color} stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                      <XAxis dataKey="time" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis domain={['auto', 'auto']} stroke="#475569" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val.toLocaleString()}`} />
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '12px', fontSize: '12px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)' }}
-                        itemStyle={{ color: assetConfig[selectedAsset].color }}
-                      />
-                      <Area type="monotone" dataKey="close" stroke={assetConfig[selectedAsset].color} strokeWidth={3} fillOpacity={1} fill="url(#colorPrice)" />
-                      
-                      {/* Interactive Annotations */}
-                      {annotations.map((note, i) => (
-                        <ReferenceDot 
-                          key={i}
-                          x={note.x} 
-                          y={note.y} 
-                          r={6} 
-                          fill={assetConfig[selectedAsset].color} 
-                          stroke="#fff" 
-                          strokeWidth={2}
-                          className="cursor-pointer hover:scale-150 transition-transform"
-                          onMouseEnter={() => setHoveredAnnotation(`${note.label}: ${note.desc}`)}
-                          onMouseLeave={() => setHoveredAnnotation(null)}
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                        <XAxis dataKey="time" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
+                        <YAxis domain={['auto', 'auto']} stroke="#475569" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val.toLocaleString()}`} />
+                        <Tooltip 
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload as MarketData;
+                              return (
+                                <div className="bg-[#1e293b] p-3 rounded-lg border border-white/10 shadow-xl text-[10px]">
+                                  <p className="font-black text-slate-400 mb-2 uppercase">{data.time}</p>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                    <span className="text-slate-500">O:</span> <span className="text-white font-bold">${data.open.toFixed(2)}</span>
+                                    <span className="text-slate-500">H:</span> <span className="text-white font-bold">${data.high.toFixed(2)}</span>
+                                    <span className="text-slate-500">L:</span> <span className="text-white font-bold">${data.low.toFixed(2)}</span>
+                                    <span className="text-slate-500">C:</span> <span className="text-white font-bold">${data.close.toFixed(2)}</span>
+                                    <span className="text-slate-500">V:</span> <span className="text-white font-bold">{data.volume.toFixed(0)}</span>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
                         />
-                      ))}
-                    </AreaChart>
-                  </ResponsiveContainer>
+                        
+                        {/* Candlestick Wicks */}
+                        <Bar dataKey="high" fill="none" strokeWidth={1}>
+                          {chartData.map((entry, index) => (
+                            <Cell key={`wick-${index}`} stroke={entry.close > entry.open ? '#10b981' : '#f43f5e'} />
+                          ))}
+                        </Bar>
+                        
+                        {/* Candlestick Bodies */}
+                        <Bar 
+                          dataKey={(d: MarketData) => Math.abs(d.close - d.open)} 
+                          stackId="a"
+                        >
+                          {chartData.map((entry, index) => (
+                            <Cell 
+                              key={`body-${index}`} 
+                              fill={entry.close > entry.open ? '#10b981' : '#f43f5e'} 
+                              stroke={entry.close > entry.open ? '#10b981' : '#f43f5e'}
+                            />
+                          ))}
+                        </Bar>
+
+                        {/* Event Markers */}
+                        {chartData.map((data, i) => (
+                          data.events?.map((evt, j) => (
+                            <ReferenceDot 
+                              key={`${i}-${j}`}
+                              x={data.time}
+                              y={data.high + (data.high - data.low) * 0.2}
+                              r={4}
+                              fill={evt.impact === 'bullish' ? '#10b981' : '#f43f5e'}
+                              stroke="#fff"
+                              strokeWidth={1}
+                              className="cursor-pointer hover:scale-150 transition-transform"
+                              onClick={() => setSelectedEvent(evt)}
+                            />
+                          ))
+                        ))}
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Technical Indicators Sidebar */}
+                  <div className="space-y-4">
+                    <div className="bg-black/40 border border-white/5 rounded-xl p-4">
+                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">技术指标 (Indicators)</h4>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-400">RSI (14)</span>
+                          <span className="text-xs font-black text-emerald-500">62.45</span>
+                        </div>
+                        <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                          <div className="bg-emerald-500 h-full" style={{ width: '62%' }} />
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-400">MACD</span>
+                          <span className="text-xs font-black text-emerald-500">Bullish Cross</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-400">MA (200)</span>
+                          <span className="text-xs font-black text-rose-500">Below</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Quick Stats Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {[
-                  { label: '24h 成交额', value: '$82.4B', change: '+12%', icon: Activity },
-                  { label: '全网持仓', value: '$34.1B', change: '-2.5%', icon: BarChart3 },
-                  { label: '贪婪指数', value: '78', change: '极度贪婪', icon: Shield },
-                  { label: '多空比', value: '1.08', change: '看涨占优', icon: TrendingUp },
-                ].map((stat, i) => (
-                  <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/[0.08] transition-colors">
-                    <div className="flex items-center gap-2 text-slate-500 mb-2">
-                      <stat.icon size={14} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">{stat.label}</span>
+              {/* Market Analytics Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-8">
+                {/* Market Depth */}
+                <div className="lg:col-span-1 bg-black/40 border border-white/10 rounded-xl p-5">
+                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center justify-between">
+                    <span>市场深度 (Market Depth)</span>
+                    <span className="text-emerald-500 animate-pulse">LIVE</span>
+                  </h3>
+                  <div className="space-y-1 font-mono">
+                    {/* Sells */}
+                    {[...Array(4)].map((_, i) => (
+                      <div key={`sell-${i}`} className="relative h-6 flex items-center justify-between px-3 text-[10px] font-bold">
+                        <div className="absolute inset-0 bg-rose-500/10 origin-right" style={{ width: `${Math.random() * 60 + 20}%`, right: 0 }} />
+                        <span className="text-rose-500 z-10">${(currentPrice * (1 + (4-i) * 0.001)).toLocaleString()}</span>
+                        <span className="text-slate-400 z-10">{(Math.random() * 5).toFixed(3)}</span>
+                      </div>
+                    ))}
+                    {/* Spread */}
+                    <div className="py-2 border-y border-white/5 flex justify-center">
+                      <span className="text-[10px] font-black text-slate-600 uppercase">Spread: 0.02%</span>
                     </div>
-                    <div className="flex items-end justify-between">
-                      <span className="text-xl font-black">{stat.value}</span>
-                      <span className="text-[10px] font-bold text-emerald-500">{stat.change}</span>
-                    </div>
+                    {/* Buys */}
+                    {[...Array(4)].map((_, i) => (
+                      <div key={`buy-${i}`} className="relative h-6 flex items-center justify-between px-3 text-[10px] font-bold">
+                        <div className="absolute inset-0 bg-emerald-500/10 origin-left" style={{ width: `${Math.random() * 60 + 20}%`, left: 0 }} />
+                        <span className="text-emerald-500 z-10">${(currentPrice * (1 - (i+1) * 0.001)).toLocaleString()}</span>
+                        <span className="text-slate-400 z-10">{(Math.random() * 5).toFixed(3)}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </div>
+
+                {/* Quick Stats */}
+                <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    { label: '24h 成交额', value: '$82.4B', change: '+12%', icon: Activity, detail: 'Institutional Volume High' },
+                    { label: '全网持仓', value: '$34.1B', change: '-2.5%', icon: BarChart3, detail: 'Long Squeeze Risk' },
+                    { label: '贪婪指数', value: '78', change: '极度贪婪', icon: Shield, detail: 'Market Overheated' },
+                    { label: '多空比', value: '1.08', change: '看涨占优', icon: TrendingUp, detail: 'Retail Bias Bullish' },
+                    { label: '波动率 (VIX)', value: '18.4', change: '+4.2%', icon: Zap, detail: 'Increasing Uncertainty' },
+                    { label: '资金费率', value: '0.01%', change: 'Neutral', icon: Globe, detail: 'Balanced Positioning' },
+                  ].map((stat, i) => (
+                    <div key={i} className="bg-black/40 border border-white/10 rounded-xl p-5 hover:border-orange-500/30 transition-all group">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2 text-slate-500">
+                          <stat.icon size={14} className="group-hover:text-orange-500 transition-colors" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">{stat.label}</span>
+                        </div>
+                        <span className={`text-[10px] font-black ${stat.change.includes('+') || stat.change.includes('看涨') ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {stat.change}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl font-black text-white">{stat.value}</span>
+                      </div>
+                      <p className="text-[9px] text-slate-600 mt-2 font-medium uppercase tracking-tighter">{stat.detail}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </motion.div>
           )}
@@ -560,67 +695,80 @@ export default function App() {
             >
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-2xl font-black tracking-tighter uppercase flex items-center gap-3">
-                  <Newspaper className="text-orange-500" /> 全网深度情报 <span className="text-xs font-bold text-slate-500">(双语对照)</span>
+                  <Newspaper className="text-orange-500" /> 实时情报终端 <span className="text-xs font-bold text-slate-500">(Intelligence Terminal)</span>
                 </h2>
-                {isFetchingNews && (
-                  <div className="flex items-center gap-2 text-orange-500 animate-pulse">
-                    <RefreshCw size={14} className="animate-spin" />
-                    <span className="text-[10px] font-black uppercase">正在抓取最新情报...</span>
+                <div className="flex items-center gap-4">
+                  {isFetchingNews && (
+                    <div className="flex items-center gap-2 text-orange-500 animate-pulse">
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span className="text-[10px] font-black uppercase">正在抓取...</span>
+                    </div>
+                  )}
+                  <div className="flex bg-white/5 p-1 rounded-lg border border-white/10">
+                    <span className="px-3 py-1 text-[10px] font-black text-emerald-500 bg-emerald-500/10 rounded">BULLISH 62%</span>
+                    <span className="px-3 py-1 text-[10px] font-black text-rose-500">BEARISH 38%</span>
                   </div>
-                )}
+                </div>
               </div>
               
-              {liveIntel.map((item) => (
-                <article key={item.id} className="group bg-white/5 border border-white/10 rounded-2xl p-6 hover:bg-white/[0.08] transition-all">
-                  <div className="flex flex-col md:flex-row gap-6">
-                    <div className="flex-1 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className="text-[10px] font-black text-orange-500 uppercase tracking-widest">{item.source}</span>
-                          <span className="text-[10px] font-bold text-slate-600">/</span>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase">{item.category}</span>
+              <div className="grid grid-cols-1 gap-4">
+                {liveIntel.map((item) => (
+                  <article key={item.id} className="group bg-black/40 border border-white/10 rounded-xl overflow-hidden hover:border-orange-500/50 transition-all flex h-48">
+                    <div className="w-2 bg-orange-500 shrink-0" style={{ backgroundColor: item.sentiment === 'bullish' ? '#10b981' : item.sentiment === 'bearish' ? '#f43f5e' : '#64748b' }} />
+                    
+                    <div className="flex-1 p-5 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] font-black text-orange-500 uppercase tracking-widest">{item.source}</span>
+                            <span className="text-[10px] font-bold text-slate-700">|</span>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase">{item.category}</span>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            {item.impactScore && (
+                              <div className="flex items-center gap-1">
+                                <span className="text-[8px] font-black text-slate-500 uppercase">Impact</span>
+                                <span className="text-xs font-black text-white">{item.impactScore}/10</span>
+                              </div>
+                            )}
+                            <span className="text-[10px] font-bold text-slate-600">{item.time}</span>
+                          </div>
                         </div>
-                        <span className="text-[10px] font-bold text-slate-600">{item.time}</span>
-                      </div>
 
-                      <div className="space-y-2">
-                        <h2 className="text-xs font-bold text-slate-500 uppercase tracking-tight leading-tight opacity-50 group-hover:opacity-100 transition-opacity">
-                          {item.titleEn}
-                        </h2>
-                        <h3 className="text-2xl font-black text-white leading-tight">
+                        <h3 className="text-lg font-black text-white leading-tight mb-2 group-hover:text-orange-500 transition-colors">
                           {item.titleCn}
                         </h3>
-                      </div>
-
-                      <div className="space-y-4 p-5 bg-black/40 rounded-xl border border-white/5">
-                        <p className="text-xs text-slate-500 leading-relaxed italic border-l-2 border-white/10 pl-4">
-                          "{item.contentEn}"
-                        </p>
-                        <p className="text-base text-slate-200 leading-relaxed font-medium">
+                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
                           {item.contentCn}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        {item.videoUrl && (
-                          <a href={item.videoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 text-rose-500 rounded-lg text-[10px] font-black uppercase hover:bg-rose-500 hover:text-white transition-all">
-                            <PlayCircle size={14} /> 查看视频分析
-                          </a>
-                        )}
-                        <button className="text-[10px] font-black text-slate-600 uppercase tracking-widest hover:text-white transition-colors flex items-center gap-1">
-                          <ExternalLink size={12} /> 查看原文
+                      <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5">
+                        <div className="flex items-center gap-4">
+                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                            item.sentiment === 'bullish' ? 'bg-emerald-500/10 text-emerald-500' : 
+                            item.sentiment === 'bearish' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-500/10 text-slate-500'
+                          }`}>
+                            {item.sentiment}
+                          </span>
+                          <p className="text-[9px] text-slate-600 font-medium italic truncate max-w-[300px]">
+                            {item.titleEn}
+                          </p>
+                        </div>
+                        <button className="text-[10px] font-black text-slate-500 uppercase hover:text-white transition-colors flex items-center gap-1">
+                          <ExternalLink size={12} /> Details
                         </button>
                       </div>
                     </div>
 
                     {item.mediaUrl && (
-                      <div className="w-full md:w-64 h-40 rounded-xl overflow-hidden border border-white/10 shrink-0">
-                        <img src={item.mediaUrl} alt="Intel" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-700" referrerPolicy="no-referrer" />
+                      <div className="w-64 h-full overflow-hidden border-l border-white/10 shrink-0 hidden md:block">
+                        <img src={item.mediaUrl} alt="Intel" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700 group-hover:scale-110" referrerPolicy="no-referrer" />
                       </div>
                     )}
-                  </div>
-                </article>
-              ))}
+                  </article>
+                ))}
+              </div>
             </motion.div>
           )}
 
@@ -633,32 +781,42 @@ export default function App() {
               className="grid grid-cols-1 lg:grid-cols-2 gap-6"
             >
               <div className="space-y-6">
-                <h2 className="text-xl font-black tracking-tighter flex items-center gap-2">
-                  <Globe className="text-emerald-500" /> 宏观经济指标
-                </h2>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-2xl font-black tracking-tighter uppercase flex items-center gap-3">
+                    <Globe className="text-emerald-500" /> 宏观经济矩阵 <span className="text-xs font-bold text-slate-500">(Global Macro)</span>
+                  </h2>
+                  <span className="text-[10px] font-black text-slate-500 uppercase">Updated: 10m ago</span>
+                </div>
+                
                 <div className="grid grid-cols-1 gap-4">
                   {MACRO_INDICATORS.map((item, i) => (
-                    <div key={i} className="bg-white/5 border border-white/10 rounded-2xl p-6 relative overflow-hidden group">
-                      <div className="flex justify-between items-start relative z-10">
-                        <div>
-                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">{item.name}</p>
-                          <h3 className="text-2xl font-black">{item.nameCn}</h3>
+                    <div key={i} className="bg-black/40 border border-white/10 rounded-xl p-6 hover:border-emerald-500/30 transition-all group">
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{item.name}</p>
+                          <h3 className="text-xl font-black text-white">{item.nameCn}</h3>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-black tracking-tighter">{item.value}</p>
-                          <p className={`text-xs font-bold ${item.trend === 'up' ? 'text-emerald-500' : 'text-rose-500'}`}>{item.change}</p>
+                          <p className="text-2xl font-black text-white tracking-tighter">{item.value}</p>
+                          <div className={`flex items-center justify-end gap-1 text-xs font-black ${item.trend === 'up' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {item.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                            {item.change}
+                          </div>
                         </div>
                       </div>
-                      <div className="mt-4 flex items-center gap-4 relative z-10">
-                        <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${
-                          item.impact === 'Positive' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'
-                        }`}>
-                          市场影响: {item.impact === 'Positive' ? '利好' : '利空'}
+                      
+                      <div className="mt-6 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${
+                            item.impact === 'Positive' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'
+                          }`}>
+                            Impact: {item.impact === 'Positive' ? 'BULLISH' : 'BEARISH'}
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-medium italic">{item.desc}</p>
                         </div>
-                        <p className="text-xs text-slate-500 italic">{item.desc}</p>
-                      </div>
-                      <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <Info size={48} />
+                        <div className="w-12 h-12 rounded-full border border-white/5 flex items-center justify-center group-hover:border-emerald-500/30 transition-colors">
+                          <Activity size={16} className="text-slate-700 group-hover:text-emerald-500 transition-colors" />
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -666,47 +824,58 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
-                <h2 className="text-xl font-black tracking-tighter flex items-center gap-2">
-                  <Shield className="text-orange-500" /> 机构信号与风险
-                </h2>
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-8">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-2xl font-black tracking-tighter uppercase flex items-center gap-3">
+                    <Shield className="text-orange-500" /> 机构流向与头寸 <span className="text-xs font-bold text-slate-500">(Institutional Flows)</span>
+                  </h2>
+                </div>
+
+                <div className="bg-black/40 border border-white/10 rounded-xl p-6 space-y-8">
                   <div>
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">顶级机构持仓信号</h3>
-                    <div className="space-y-4">
+                    <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6">顶级机构持仓信号 (Institutional Sentiment)</h3>
+                    <div className="space-y-6">
                       {[
-                        { name: 'BlackRock', signal: 'BUY', confidence: 88 },
-                        { name: 'Goldman Sachs', signal: 'HOLD', confidence: 65 },
-                        { name: 'J.P. Morgan', signal: 'SELL', confidence: 42 },
+                        { name: 'BlackRock', signal: 'BUY', confidence: 88, detail: 'Spot ETF Inflow Dominant' },
+                        { name: 'Goldman Sachs', signal: 'HOLD', confidence: 65, detail: 'Macro Uncertainty Hedge' },
+                        { name: 'J.P. Morgan', signal: 'SELL', confidence: 42, detail: 'Profit Taking at Resistance' },
+                        { name: 'Fidelity', signal: 'BUY', confidence: 75, detail: 'Long-term Accumulation' },
                       ].map((inst, i) => (
-                        <div key={i} className="flex items-center justify-between">
-                          <span className="text-sm font-bold">{inst.name}</span>
-                          <div className="flex items-center gap-4">
-                            <span className={`text-[10px] font-black px-2 py-0.5 rounded ${inst.signal === 'BUY' ? 'bg-emerald-500 text-black' : inst.signal === 'SELL' ? 'bg-rose-500 text-black' : 'bg-slate-500 text-black'}`}>
-                              {inst.signal}
-                            </span>
-                            <div className="w-24 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                              <div className="bg-orange-500 h-full" style={{ width: `${inst.confidence}%` }} />
+                        <div key={i} className="group">
+                          <div className="flex items-center justify-between mb-2">
+                            <div>
+                              <span className="text-sm font-black text-white">{inst.name}</span>
+                              <p className="text-[9px] text-slate-600 uppercase font-bold">{inst.detail}</p>
                             </div>
+                            <div className="flex items-center gap-4">
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                                inst.signal === 'BUY' ? 'bg-emerald-500/10 text-emerald-500' : 
+                                inst.signal === 'SELL' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-500/10 text-slate-500'
+                              }`}>
+                                {inst.signal}
+                              </span>
+                              <span className="text-xs font-black text-white w-8 text-right">{inst.confidence}%</span>
+                            </div>
+                          </div>
+                          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                            <div className="bg-orange-500 h-full group-hover:bg-orange-400 transition-colors" style={{ width: `${inst.confidence}%` }} />
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                  
+
                   <div className="pt-8 border-t border-white/5">
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">新手贴士 (Newbie Guide)</h3>
-                    <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-xl p-4 space-y-3">
-                      <div className="flex items-start gap-3">
-                        <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center shrink-0 text-[10px] font-bold">1</div>
-                        <p className="text-xs text-slate-300">关注美元指数 (DXY)，它通常与比特币呈负相关。</p>
+                    <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6">风险预警系统 (Risk Alert System)</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-xl">
+                        <p className="text-[8px] font-black text-rose-500 uppercase mb-1">Systemic Risk</p>
+                        <p className="text-lg font-black text-white">MODERATE</p>
+                        <p className="text-[9px] text-slate-500 mt-2">CPI Data Pending</p>
                       </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center shrink-0 text-[10px] font-bold">2</div>
-                        <p className="text-xs text-slate-300">交易所流出量增加通常意味着大户正在囤币，是看涨信号。</p>
-                      </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center shrink-0 text-[10px] font-bold">3</div>
-                        <p className="text-xs text-slate-300">贪婪指数过高时（如 80 以上），需警惕短期回调风险。</p>
+                      <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                        <p className="text-[8px] font-black text-emerald-500 uppercase mb-1">Liquidity Index</p>
+                        <p className="text-lg font-black text-white">STABLE</p>
+                        <p className="text-[9px] text-slate-500 mt-2">Central Bank Support</p>
                       </div>
                     </div>
                   </div>
@@ -737,50 +906,75 @@ export default function App() {
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Price Range Card */}
-                <div className="lg:col-span-1 bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col justify-between">
+                <div className="lg:col-span-1 bg-black/40 border border-white/10 rounded-xl p-6 flex flex-col justify-between">
                   <div>
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6">24h 价格概率区间</h3>
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">24h 价格概率区间</h3>
+                      <span className="text-[8px] font-black text-indigo-400 bg-indigo-400/10 px-1.5 py-0.5 rounded">QUANT MODEL V2.1</span>
+                    </div>
                     {predictionData?.priceRange ? (
-                      <div className="space-y-4">
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-4xl font-black text-white">${predictionData.priceRange.min.toLocaleString()}</span>
-                          <span className="text-slate-500 font-bold">-</span>
-                          <span className="text-4xl font-black text-white">${predictionData.priceRange.max.toLocaleString()}</span>
+                      <div className="space-y-6">
+                        <div className="flex items-baseline gap-2 justify-center py-4 bg-white/[0.02] rounded-xl border border-white/5">
+                          <span className="text-3xl font-black text-white">${predictionData.priceRange.min.toLocaleString()}</span>
+                          <span className="text-slate-600 font-bold">-</span>
+                          <span className="text-3xl font-black text-white">${predictionData.priceRange.max.toLocaleString()}</span>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <div className="px-3 py-1 bg-indigo-500/20 text-indigo-400 rounded-full text-[10px] font-black uppercase">
-                            置信度: {predictionData.priceRange.probability}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="p-3 bg-white/[0.02] rounded-lg border border-white/5">
+                            <p className="text-[8px] font-black text-slate-600 uppercase mb-1">置信度 (Confidence)</p>
+                            <p className="text-lg font-black text-indigo-400">{predictionData.priceRange.probability}</p>
                           </div>
-                          <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${
-                            predictionData.priceRange.bias === 'Bullish' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'
-                          }`}>
-                            倾向: {predictionData.priceRange.bias === 'Bullish' ? '看涨' : '看跌'}
+                          <div className="p-3 bg-white/[0.02] rounded-lg border border-white/5">
+                            <p className="text-[8px] font-black text-slate-600 uppercase mb-1">市场倾向 (Bias)</p>
+                            <p className={`text-lg font-black ${predictionData.priceRange.bias === 'Bullish' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                              {predictionData.priceRange.bias === 'Bullish' ? 'BULLISH' : 'BEARISH'}
+                            </p>
                           </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="h-24 flex items-center justify-center text-slate-600 italic text-xs">计算中...</div>
+                      <div className="h-40 flex flex-col items-center justify-center text-slate-600 italic text-xs gap-3">
+                        <RefreshCw size={20} className="animate-spin" />
+                        正在运行蒙特卡洛模拟...
+                      </div>
                     )}
                   </div>
-                  <p className="text-[10px] text-slate-600 mt-6 italic">
-                    * 基于当前波动率与订单流统计模型计算。
-                  </p>
+                  <div className="mt-6 pt-6 border-t border-white/5">
+                    <h4 className="text-[10px] font-black text-slate-500 uppercase mb-3 text-center">风险/回报比 (Risk/Reward Matrix)</h4>
+                    <div className="flex h-4 w-full rounded-full overflow-hidden bg-white/5">
+                      <div className="bg-rose-500/40 h-full" style={{ width: '30%' }} />
+                      <div className="bg-emerald-500 h-full" style={{ width: '70%' }} />
+                    </div>
+                    <div className="flex justify-between mt-2 text-[8px] font-black text-slate-600">
+                      <span>RISK 1.2</span>
+                      <span>REWARD 3.5</span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Correlation Map */}
-                <div className="lg:col-span-2 bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6">多因子相关性矩阵 (Correlation Map)</h3>
+                <div className="lg:col-span-2 bg-black/40 border border-white/10 rounded-xl p-6">
+                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6">多因子相关性矩阵 (Correlation Matrix)</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {predictionData?.correlationMap?.map((item: any, i: number) => (
-                      <div key={i} className="flex items-center justify-between p-4 bg-black/40 rounded-xl border border-white/5">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-1.5 h-1.5 rounded-full ${item.impactScore > 7 ? 'bg-orange-500' : 'bg-slate-500'}`} />
-                          <span className="text-sm font-bold text-slate-300">{item.factor}</span>
+                      <div key={i} className="group flex items-center justify-between p-4 bg-white/[0.02] rounded-xl border border-white/5 hover:bg-white/[0.04] transition-all">
+                        <div className="flex items-center gap-4">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-black ${
+                            item.impactScore > 7 ? 'bg-orange-500/20 text-orange-500' : 'bg-slate-500/20 text-slate-500'
+                          }`}>
+                            {item.impactScore}
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-white">{item.factor}</h4>
+                            <p className="text-[10px] text-slate-500">{item.relationship}</p>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[10px] font-black text-slate-500 uppercase">{item.relationship}</p>
-                          <div className="w-24 h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
-                            <div className="bg-indigo-500 h-full" style={{ width: `${item.impactScore * 10}%` }} />
+                        <div className="flex flex-col items-end">
+                          <span className={`text-[10px] font-black ${item.impactScore > 7 ? 'text-orange-500' : 'text-slate-400'}`}>
+                            {item.impactScore > 7 ? 'HIGH IMPACT' : 'MODERATE'}
+                          </span>
+                          <div className="w-16 h-1 bg-white/10 rounded-full mt-1 overflow-hidden">
+                            <div className={`h-full ${item.impactScore > 7 ? 'bg-orange-500' : 'bg-slate-500'}`} style={{ width: `${item.impactScore * 10}%` }} />
                           </div>
                         </div>
                       </div>
