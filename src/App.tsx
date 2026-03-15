@@ -200,10 +200,8 @@ export default function App() {
 
   // AI Analysis Function with Google Search Grounding
   const runAiAnalysis = async () => {
-    if (!ai) {
-      setAiSummary("AI 智能分析仅在安全预览环境中可用。");
-      return;
-    }
+  setAiSummary("AI 分析功能暂未配置，当前显示实时 RSS 新闻数据。");
+};
     setIsAnalyzing(true);
     try {
       const prompt = `
@@ -301,8 +299,9 @@ export default function App() {
   const [predictionData, setPredictionData] = useState<any>(null);
   const [isPredicting, setIsPredicting] = useState(false);
 
-  const runPricePrediction = async () => {
-    if (!ai) return;
+const runPricePrediction = async () => {
+  setPredictionData(null);
+};
     setIsPredicting(true);
     try {
       const prompt = `
