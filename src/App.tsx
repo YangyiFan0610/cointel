@@ -138,53 +138,12 @@ const MACRO_INDICATORS: MacroIndicator[] = [
   { name: 'US 10Y Yield', nameCn: '美债收益率', value: '4.21%', change: '+0.05', trend: 'up', impact: 'Negative', desc: '收益率上升会吸引资金离开高风险资产。' },
 ];
 
-const INTEL_FEED: IntelItem[] = [
-  {
-    id: '1',
-    source: 'Bloomberg Terminal',
-    category: 'Macro',
-    titleEn: 'Fed Officials Signal Caution on Rate Cut Timing',
-    titleCn: '美联储官员对降息时机表示谨慎',
-    contentEn: 'Several FOMC members emphasize need for more evidence of inflation cooling before pivot.',
-    contentCn: '多位美联储官员强调，在转向之前需要更多通胀降温的证据。',
-    time: '12m ago',
-    sentiment: 'bearish',
-    impactScore: 8,
-    importance: 3,
-    mediaUrl: 'https://picsum.photos/seed/fed/800/400'
-  },
-  {
-    id: '2',
-    source: 'Reuters',
-    category: 'Institutional',
-    titleEn: 'BlackRock Bitcoin ETF Sees Record Daily Inflow',
-    titleCn: '贝莱德比特币 ETF 创下每日资金流入纪录',
-    contentEn: 'IBIT captures $788M in a single day, signaling strong institutional appetite.',
-    contentCn: 'IBIT 单日吸金 7.88 亿美元，显示出机构的强劲胃口。',
-    time: '45m ago',
-    sentiment: 'bullish',
-    impactScore: 9,
-    importance: 3,
-    mediaUrl: 'https://picsum.photos/seed/blackrock/800/400'
-  },
-  {
-    id: '3',
-    source: 'CoinDesk',
-    category: 'Technical',
-    titleEn: 'Bitcoin RSI Enters Overbought Territory on Daily Chart',
-    titleCn: '比特币日线图 RSI 进入超买区域',
-    contentEn: 'Momentum oscillators suggest potential short-term consolidation after recent rally.',
-    contentCn: '动量指标显示在近期上涨后可能出现短期盘整。',
-    time: '1h ago',
-    sentiment: 'neutral',
-    impactScore: 6,
-    importance: 2,
-    mediaUrl: 'https://picsum.photos/seed/chart/800/400'
-  }
-];
-
+const INTEL_FEED: IntelItem[] = [];
 // --- Components ---
-
+const RSS_SOURCES = [
+  'https://api.rss2json.com/v1/api.json?rss_url=https://cointelegraph.com/rss',
+  'https://api.rss2json.com/v1/api.json?rss_url=https://decrypt.co/feed',
+];
 export default function App() {
   const [activeTab, setActiveTab] = useState<'market' | 'intel' | 'macro' | 'prediction'>('market');
   const [selectedAsset, setSelectedAsset] = useState<AssetType>('BTC');
@@ -283,26 +242,35 @@ export default function App() {
   };
 
   // Fetch Real-time News via AI
-  const fetchLiveNews = async () => {
-    if (!ai) return;
-    setIsFetchingNews(true);
-    try {
-      const prompt = `
-        Act as a Bloomberg Terminal news aggregator. 
-        Search for the 4 most critical, market-moving news items for ${selectedAsset} and Global Macro from the LAST 4 HOURS.
-        
-        For each item, provide:
-        - Source: Professional news source (e.g., Reuters, Bloomberg, Coindesk).
-        - Category: Macro, Institutional, Technical, or Narrative.
-        - TitleEn: Professional headline in English.
-        - TitleCn: Professional headline in Chinese.
-        - ContentEn: Concise summary (max 15 words).
-        - ContentCn: Concise summary (max 25 words).
-        - Sentiment: bullish, bearish, or neutral.
-        - ImpactScore: 1-10 (how much this affects price).
-        
-        Return ONLY a JSON array of objects.
-      `;
+ const fetchLiveNews = async () => {
+  setIsFetchingNews(true);
+  try {
+    const results = await Promise.all(
+      RSS_SOURCES.map(url => fetch(url).then(r => r.json()))
+    );
+    const items: IntelItem[] = results.flatMap((feed, si) =>
+      (feed.items || []).slice(0, 3).map((item: any, i: number) => ({
+        id: `rss-${si}-${i}`,
+        source: feed.feed?.title || 'News',
+        category: 'Macro' as const,
+        titleEn: item.title,
+        titleCn: item.title,
+        contentEn: item.description?.replace(/<[^>]+>/g, '').slice(0, 100) || '',
+        contentCn: item.description?.replace(/<[^>]+>/g, '').slice(0, 100) || '',
+        time: new Date(item.pubDate).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}),
+        sentiment: 'neutral' as const,
+        importance: 2 as const,
+        mediaUrl: item.enclosure?.link || item.thumbnail || undefined,
+      }))
+    );
+    setLiveIntel(items);
+    setSystemLogs(prev => [`[${new Date().toLocaleTimeString()}] 已从 RSS 获取 ${items.length} 条真实新闻`, ...prev.slice(0, 4)]);
+  } catch (error) {
+    console.error("RSS Fetch Error:", error);
+  } finally {
+    setIsFetchingNews(false);
+  }
+};
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -370,10 +338,10 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
+ useEffect(() => {
+    fetchLiveNews();
     if (ai) {
       runAiAnalysis();
-      fetchLiveNews();
       runPricePrediction();
     }
   }, [ai]);
