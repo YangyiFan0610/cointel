@@ -80,18 +80,46 @@ function scoreArticle(title: string, summary: string, tier: IntelItem['sourceTie
   return { impactScore, sentiment, whyBTC };
 }
 
-// ─── TradingView ──────────────────────────────────────────────────────────────
+// ─── Chart ────────────────────────────────────────────────────────────────────
 function TradingViewChart() {
-  const src = 'https://www.tradingview.com/widgetembed/?frameElementId=tradingview_btc&symbol=BINANCE%3ABTCUSDT&interval=D&hidesidetoolbar=0&hidetoptoolbar=0&symboledit=0&saveimage=0&toolbarbg=0d1117&studies=RSI%40tv-basicstudies%1FMACD%40tv-basicstudies&theme=dark&style=1&timezone=Asia%2FShanghai&withdateranges=1&locale=zh_CN';
+  const [loaded, setLoaded] = React.useState(false);
+  // 币安行情页 - 在大陆VPN环境下比TradingView更稳定
+  const binanceUrl = 'https://www.binance.com/zh-CN/trade/BTC_USDT?type=spot';
+  // 备用：直接用TradingView完整图表页
+  const tvUrl = 'https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT&interval=D&theme=dark';
   return (
-    <div style={{ background: '#0d1117', borderRadius: 12, overflow: 'hidden', border: '0.5px solid rgba(255,255,255,0.08)' }}>
-      <iframe
-        src={src}
-        id="tradingview_btc"
-        style={{ width: '100%', height: 640, border: 'none', display: 'block' }}
-        allowFullScreen
-        title="BTC/USDT"
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <a href={tvUrl} target="_blank" rel="noreferrer"
+          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 20px', background: '#16213e', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: 12, textDecoration: 'none', cursor: 'pointer' }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#3b82f6' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>TradingView 完整K线</span>
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>日/周/月K · RSI · MACD · 新标签页打开</span>
+          <ExternalLink size={12} style={{ color: 'rgba(255,255,255,0.4)' }} />
+        </a>
+        <a href={binanceUrl} target="_blank" rel="noreferrer"
+          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 20px', background: '#16213e', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: 12, textDecoration: 'none', cursor: 'pointer' }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#f59e0b' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>币安行情页</span>
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>BTC/USDT 实时 · 新标签页打开</span>
+          <ExternalLink size={12} style={{ color: 'rgba(255,255,255,0.4)' }} />
+        </a>
+      </div>
+      <div style={{ background: '#16213e', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, overflow: 'hidden' }}>
+        <iframe
+          src="https://s.tradingview.com/embed-widget/advanced-chart/?locale=zh_CN#%7B%22autosize%22%3Atrue%2C%22symbol%22%3A%22BINANCE%3ABTCUSDT%22%2C%22interval%22%3A%22D%22%2C%22timezone%22%3A%22Asia%2FShanghai%22%2C%22theme%22%3A%22dark%22%2C%22style%22%3A%221%22%2C%22locale%22%3A%22zh_CN%22%2C%22withdateranges%22%3Atrue%2C%22hide_side_toolbar%22%3Afalse%2C%22allow_symbol_change%22%3Afalse%2C%22studies%22%3A%5B%22STD%3BRSI%22%2C%22STD%3BMACD%22%5D%2C%22support_host%22%3A%22https%3A%2F%2Fwww.tradingview.com%22%7D"
+          style={{ width: '100%', height: 600, border: 'none', display: 'block' }}
+          onLoad={() => setLoaded(true)}
+          allowFullScreen
+          title="BTC Chart"
+        />
+        {!loaded && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, background: '#16213e' }}>
+            <div style={{ width: 32, height: 32, border: '2px solid rgba(255,255,255,0.1)', borderTop: '2px solid #f97316', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>图表加载中，如长时间未加载请点击上方链接</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -139,77 +167,93 @@ export default function App() {
     }));
   };
 
-  // 稳定轮询，不依赖函数引用
+  // 价格轮询 - 使用 allorigins 代理绕过CORS/GFW限制
   useEffect(() => {
     let alive = true;
+    const proxy = (url: string) =>
+      `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+
     const run = async () => {
       if (!alive) return;
-      const sources = [
+      // 依次尝试4个来源
+      const attempts = [
+        // 1. Binance via allorigins代理
         async () => {
-          const [b, e] = await Promise.all([
-            fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(4000) }),
-            fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(4000) }),
+          const [rb, re] = await Promise.all([
+            fetch(proxy('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'), { signal: AbortSignal.timeout(8000) }),
+            fetch(proxy('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT'), { signal: AbortSignal.timeout(8000) }),
           ]);
-          if (!b.ok || !e.ok) throw new Error();
-          const [bs, es] = await Promise.all([b.json(), e.json()]);
+          const [wb, we] = await Promise.all([rb.json(), re.json()]);
+          const bs = JSON.parse(wb.contents); const es = JSON.parse(we.contents);
           const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice, marketCap: 0 });
           return { btc: p(bs), eth: p(es) };
         },
+        // 2. CoinGecko via allorigins代理
         async () => {
-          const [b, e] = await Promise.all([
-            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(4000) }),
-            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(4000) }),
-          ]);
-          if (!b.ok || !e.ok) throw new Error();
-          const [bs, es] = await Promise.all([b.json(), e.json()]);
-          const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice, marketCap: 0 });
-          return { btc: p(bs), eth: p(es) };
-        },
-        async () => {
-          const r = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&sparkline=false', { signal: AbortSignal.timeout(5000) });
-          if (!r.ok) throw new Error();
-          const coins = await r.json();
+          const r = await fetch(proxy('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&sparkline=false'), { signal: AbortSignal.timeout(10000) });
+          const w = await r.json();
+          const coins = JSON.parse(w.contents);
           const p = (c: any): CoinData => ({ price: c.current_price, change24h: c.price_change_percentage_24h, high24h: c.high_24h, low24h: c.low_24h, volume24h: c.total_volume, marketCap: c.market_cap });
           return { btc: p(coins.find((c: any) => c.id === 'bitcoin')), eth: p(coins.find((c: any) => c.id === 'ethereum')) };
         },
+        // 3. Binance直连（VPN开着时可用）
         async () => {
           const [b, e] = await Promise.all([
-            fetch('https://api.coincap.io/v2/assets/bitcoin', { signal: AbortSignal.timeout(5000) }),
-            fetch('https://api.coincap.io/v2/assets/ethereum', { signal: AbortSignal.timeout(5000) }),
+            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(5000) }),
+            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(5000) }),
+          ]);
+          if (!b.ok || !e.ok) throw new Error();
+          const [bs, es] = await Promise.all([b.json(), e.json()]);
+          const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice, marketCap: 0 });
+          return { btc: p(bs), eth: p(es) };
+        },
+        // 4. CoinCap直连
+        async () => {
+          const [b, e] = await Promise.all([
+            fetch('https://api.coincap.io/v2/assets/bitcoin', { signal: AbortSignal.timeout(6000) }),
+            fetch('https://api.coincap.io/v2/assets/ethereum', { signal: AbortSignal.timeout(6000) }),
           ]);
           const [bj, ej] = await Promise.all([b.json(), e.json()]);
-          const p = (d: any): CoinData => ({ price: +d.priceUsd, change24h: +d.changePercent24Hr, high24h: +d.priceUsd * 1.02, low24h: +d.priceUsd * 0.98, volume24h: +d.volumeUsd24Hr, marketCap: +d.marketCapUsd });
+          const p = (d: any): CoinData => ({ price: +d.priceUsd, change24h: +d.changePercent24Hr, high24h: +d.priceUsd*1.02, low24h: +d.priceUsd*0.98, volume24h: +d.volumeUsd24Hr, marketCap: +d.marketCapUsd });
           return { btc: p(bj.data), eth: p(ej.data) };
         },
       ];
-      for (const src of sources) {
+      for (const attempt of attempts) {
         try {
-          const { btc: btcData, eth: ethData } = await src();
-          if (!alive || !btcData?.price || isNaN(btcData.price)) continue;
-          setBtc(btcData);
-          setEth(ethData);
+          const { btc: bd, eth: ed } = await attempt();
+          if (!alive || !bd?.price || isNaN(bd.price)) continue;
+          setBtc(bd); setEth(ed);
           setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           setPriceLoading(false);
-          break;
+          return; // 成功就停止
         } catch { continue; }
       }
     };
+
     run();
-    const iv = setInterval(run, 5000);
+    const iv = setInterval(run, 8000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
 
-  // 恐惧贪婪单独轮询，每5分钟一次
+  // 恐惧贪婪 - 每5分钟
   useEffect(() => {
-    const fetchFG = async () => {
+    const fg = async () => {
       try {
-        const r = await fetch('https://api.alternative.me/fng/', { signal: AbortSignal.timeout(5000) });
-        const d = await r.json();
-        if (d?.data?.[0]) setFearGreed({ value: d.data[0].value, classification: d.data[0].value_classification });
+        const proxy = (url: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+        // 先试代理
+        try {
+          const r = await fetch(proxy('https://api.alternative.me/fng/'), { signal: AbortSignal.timeout(8000) });
+          const w = await r.json(); const d = JSON.parse(w.contents);
+          if (d?.data?.[0]) { setFearGreed({ value: d.data[0].value, classification: d.data[0].value_classification }); return; }
+        } catch {}
+        // 再试直连
+        const r2 = await fetch('https://api.alternative.me/fng/', { signal: AbortSignal.timeout(5000) });
+        const d2 = await r2.json();
+        if (d2?.data?.[0]) setFearGreed({ value: d2.data[0].value, classification: d2.data[0].value_classification });
       } catch {}
     };
-    fetchFG();
-    const iv = setInterval(fetchFG, 5 * 60 * 1000);
+    fg();
+    const iv = setInterval(fg, 5 * 60 * 1000);
     return () => clearInterval(iv);
   }, []);
 
@@ -787,7 +831,7 @@ export default function App() {
 
         </AnimatePresence>
       </div>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}} @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
