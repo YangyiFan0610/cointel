@@ -81,17 +81,76 @@ function scoreArticle(title: string, summary: string, tier: IntelItem['sourceTie
 }
 
 // ─── TradingView ──────────────────────────────────────────────────────────────
-function TradingViewChart({ symbol }: { symbol: 'BTC' | 'ETH' }) {
+function TradingViewChart() {
   const ref = useRef<HTMLDivElement>(null);
+  const id = 'tv-btc-cointel';
   useEffect(() => {
     if (!ref.current) return;
-    ref.current.innerHTML = '';
-    const s = document.createElement('script'); s.src = 'https://s3.tradingview.com/tv.js'; s.async = true;
-    s.onload = () => { if ((window as any).TradingView && ref.current) new (window as any).TradingView.widget({ container_id: ref.current.id, symbol: `BINANCE:${symbol}USDT`, interval: '60', timezone: 'Asia/Shanghai', theme: 'dark', style: '1', locale: 'zh_CN', toolbar_bg: '#16213e', enable_publishing: false, save_image: false, studies: ['RSI@tv-basicstudies', 'MACD@tv-basicstudies'], width: '100%', height: 500, backgroundColor: '#1a1a2e' }); };
-    document.head.appendChild(s);
-    return () => { try { document.head.removeChild(s); } catch {} };
-  }, [symbol]);
-  return <div ref={ref} id={`tv-${symbol}`} className="w-full rounded-xl overflow-hidden" style={{ height: 500 }} />;
+    const init = () => {
+      if (!(window as any).TradingView || !document.getElementById(id)) return;
+      new (window as any).TradingView.widget({
+        container_id: id,
+        symbol: 'BINANCE:BTCUSDT',
+        interval: 'D',
+        timezone: 'Asia/Shanghai',
+        theme: 'dark',
+        style: '1',
+        locale: 'zh_CN',
+        toolbar_bg: '#0d1117',
+        backgroundColor: '#0d1117',
+        enable_publishing: false,
+        hide_top_toolbar: false,
+        hide_legend: false,
+        hide_side_toolbar: false,
+        allow_symbol_change: false,
+        save_image: false,
+        withdateranges: true,
+        details: true,
+        studies: ['Volume@tv-basicstudies', 'RSI@tv-basicstudies', 'MACD@tv-basicstudies'],
+        studies_overrides: {
+          'volume.volume.color.0': 'rgba(251,113,133,0.6)',
+          'volume.volume.color.1': 'rgba(52,211,153,0.6)',
+        },
+        overrides: {
+          'mainSeriesProperties.candleStyle.upColor': '#34d399',
+          'mainSeriesProperties.candleStyle.downColor': '#fb7185',
+          'mainSeriesProperties.candleStyle.borderUpColor': '#34d399',
+          'mainSeriesProperties.candleStyle.borderDownColor': '#fb7185',
+          'mainSeriesProperties.candleStyle.wickUpColor': '#34d399',
+          'mainSeriesProperties.candleStyle.wickDownColor': '#fb7185',
+          'paneProperties.background': '#0d1117',
+          'paneProperties.backgroundType': 'solid',
+          'paneProperties.vertGridProperties.color': 'rgba(255,255,255,0.04)',
+          'paneProperties.horzGridProperties.color': 'rgba(255,255,255,0.04)',
+          'scalesProperties.textColor': 'rgba(255,255,255,0.4)',
+          'scalesProperties.backgroundColor': '#0d1117',
+        },
+        time_frames: [
+          { text: '1D', resolution: '1', description: '1分钟' },
+          { text: '5D', resolution: '5', description: '5分钟' },
+          { text: '1M', resolution: '60', description: '1小时' },
+          { text: '3M', resolution: '240', description: '4小时' },
+          { text: '1Y', resolution: 'D', description: '日K' },
+          { text: '3Y', resolution: 'W', description: '周K' },
+          { text: 'ALL', resolution: 'M', description: '月K' },
+        ],
+        width: '100%',
+        height: 640,
+      });
+    };
+    if ((window as any).TradingView) { init(); }
+    else {
+      const s = document.createElement('script');
+      s.src = 'https://s3.tradingview.com/tv.js'; s.async = true;
+      s.onload = init;
+      document.head.appendChild(s);
+    }
+  }, []);
+  return (
+    <div style={{ background: '#0d1117', borderRadius: 12, overflow: 'hidden', border: '0.5px solid rgba(255,255,255,0.08)' }}>
+      <div id={id} ref={ref} style={{ width: '100%', height: 640 }} />
+    </div>
+  );
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -125,19 +184,45 @@ export default function App() {
 
   // ── Fetch prices ──────────────────────────────────────────────────────────
   const fetchPrices = useCallback(async () => {
-    try {
-      const [cgRes, fgRes] = await Promise.all([
-        fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&order=market_cap_desc&sparkline=false'),
-        fetch('https://api.alternative.me/fng/'),
-      ]);
-      if (!cgRes.ok) throw new Error('CG');
-      const coins = await cgRes.json();
-      const fgData = await fgRes.json().catch(() => null);
+    // 三个备用数据源，依次尝试
+    const tryCoinGecko = async () => {
+      const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&order=market_cap_desc&sparkline=false', { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) throw new Error('CG limit');
+      const coins = await res.json();
       const toData = (c: any): CoinData => ({ price: c.current_price, change24h: c.price_change_percentage_24h, high24h: c.high_24h, low24h: c.low_24h, volume24h: c.total_volume, marketCap: c.market_cap });
-      const btcRaw = coins.find((c: any) => c.id === 'bitcoin');
-      const ethRaw = coins.find((c: any) => c.id === 'ethereum');
-      if (btcRaw) { setBtc(toData(btcRaw)); updateMacroWithPrice(btcRaw.current_price, btcRaw.price_change_percentage_24h); }
-      if (ethRaw) setEth(toData(ethRaw));
+      return { btc: toData(coins.find((c: any) => c.id === 'bitcoin')), eth: toData(coins.find((c: any) => c.id === 'ethereum')) };
+    };
+    const tryCoinCap = async () => {
+      const [btcRes, ethRes] = await Promise.all([
+        fetch('https://api.coincap.io/v2/assets/bitcoin', { signal: AbortSignal.timeout(6000) }),
+        fetch('https://api.coincap.io/v2/assets/ethereum', { signal: AbortSignal.timeout(6000) }),
+      ]);
+      const btcJ = await btcRes.json(); const ethJ = await ethRes.json();
+      const toData = (d: any): CoinData => ({ price: parseFloat(d.priceUsd), change24h: parseFloat(d.changePercent24Hr), high24h: parseFloat(d.priceUsd) * 1.02, low24h: parseFloat(d.priceUsd) * 0.98, volume24h: parseFloat(d.volumeUsd24Hr), marketCap: parseFloat(d.marketCapUsd) });
+      return { btc: toData(btcJ.data), eth: toData(ethJ.data) };
+    };
+    const tryBinance = async () => {
+      const [btcRes, ethRes, btcStatsRes, ethStatsRes] = await Promise.all([
+        fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', { signal: AbortSignal.timeout(6000) }),
+        fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT', { signal: AbortSignal.timeout(6000) }),
+        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(6000) }),
+        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(6000) }),
+      ]);
+      const [btcP, ethP, btcS, ethS] = await Promise.all([btcRes.json(), ethRes.json(), btcStatsRes.json(), ethStatsRes.json()]);
+      const toData = (p: any, s: any): CoinData => ({ price: parseFloat(p.price), change24h: parseFloat(s.priceChangePercent), high24h: parseFloat(s.highPrice), low24h: parseFloat(s.lowPrice), volume24h: parseFloat(s.volume) * parseFloat(p.price), marketCap: 0 });
+      return { btc: toData(btcP, btcS), eth: toData(ethP, ethS) };
+    };
+    try {
+      let data: { btc: CoinData; eth: CoinData } | null = null;
+      // 依次尝试三个数据源
+      for (const fn of [tryCoinGecko, tryBinance, tryCoinCap]) {
+        try { data = await fn(); break; } catch { continue; }
+      }
+      if (!data) throw new Error('all sources failed');
+      const fgRes = await fetch('https://api.alternative.me/fng/').catch(() => null);
+      const fgData = fgRes ? await fgRes.json().catch(() => null) : null;
+      setBtc(data.btc); updateMacroWithPrice(data.btc.price, data.btc.change24h);
+      setEth(data.eth);
       if (fgData?.data?.[0]) setFearGreed({ value: fgData.data[0].value, classification: fgData.data[0].value_classification });
       setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setPriceLoading(false);
@@ -502,32 +587,36 @@ export default function App() {
           {/* ══ CHART ════════════════════════════════════════════════════════ */}
           {activeTab === 'chart' && (
             <motion.div key="chart" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.07)', borderRadius: 10, padding: 3, gap: 2 }}>
-                  {(['BTC', 'ETH'] as const).map(s => (
-                    <button key={s} onClick={() => setChartSymbol(s)} style={{ fontSize: 11, fontWeight: 700, padding: '5px 14px', borderRadius: 7, background: chartSymbol === s ? '#f97316' : 'transparent', color: chartSymbol === s ? '#000' : 'rgba(255,255,255,0.4)', border: 'none', cursor: 'pointer' }}>{s}</button>
-                  ))}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f97316' }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>BTC / USDT</span>
+                  {btc && <span style={{ fontSize: 12, color: btc.change24h >= 0 ? '#34d399' : '#fb7185', fontWeight: 600 }}>{btc.change24h >= 0 ? '+' : ''}{btc.change24h.toFixed(2)}%</span>}
                 </div>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>含 RSI · MACD · Binance 数据</span>
-                <a href="https://www.tradingview.com" target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3, marginLeft: 'auto' }}>TradingView <ExternalLink size={9} /></a>
-              </div>
-              <div style={{ ...cardS, padding: 8 }}>
-                <TradingViewChart symbol={chartSymbol} />
-              </div>
-              {btc && eth && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                  {[
-                    { label: '当前价格', value: `$${(chartSymbol === 'BTC' ? btc : eth).price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: '#fff' },
-                    { label: '24H 最高', value: `$${(chartSymbol === 'BTC' ? btc : eth).high24h.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: '#34d399' },
-                    { label: '24H 最低', value: `$${(chartSymbol === 'BTC' ? btc : eth).low24h.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: '#fb7185' },
-                  ].map((s, i) => (
-                    <div key={i} style={cardS}>
-                      <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', marginBottom: 5 }}>{s.label}</p>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: s.color }}>{s.value}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {btc && (
+                    <div style={{ display: 'flex', gap: 16 }}>
+                      {[
+                        { label: '最新', value: `$${btc.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: '#fff' },
+                        { label: '24H高', value: `$${btc.high24h.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: '#34d399' },
+                        { label: '24H低', value: `$${btc.low24h.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: '#fb7185' },
+                      ].map((s, i) => (
+                        <div key={i}>
+                          <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)' }}>{s.label}</p>
+                          <p style={{ fontSize: 12, fontWeight: 600, color: s.color }}>{s.value}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <a href="https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT" target="_blank" rel="noreferrer" style={{ fontSize: 9, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}>全屏 <ExternalLink size={9} /></a>
                 </div>
-              )}
+              </div>
+              <TradingViewChart />
+              <div style={{ ...cardS, padding: '10px 14px' }}>
+                <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', lineHeight: 1.5 }}>
+                  图表说明：绿色K线 = 收盘高于开盘（买方胜），红色 = 收盘低于开盘（卖方胜）。点击任意K线可查看开高低收和成交量。顶部时间轴可切换 1分/5分/1时/4时/日/周/月 周期。RSI指标在下方第一格，MACD在第二格。
+                </p>
+              </div>
             </motion.div>
           )}
 
