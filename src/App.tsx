@@ -183,50 +183,42 @@ export default function App() {
   const cycleColor = monthsSinceHalving >= 12 ? '#fb7185' : monthsSinceHalving >= 6 ? '#fbbf24' : '#34d399';
 
   // ── Fetch prices ──────────────────────────────────────────────────────────
+  // 用 Binance WebSocket 实时推送价格，不轮询，毫秒级更新
   const fetchPrices = useCallback(async () => {
-    // 三个备用数据源，依次尝试
-    const tryCoinGecko = async () => {
-      const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&order=market_cap_desc&sparkline=false', { signal: AbortSignal.timeout(6000) });
-      if (!res.ok) throw new Error('CG limit');
-      const coins = await res.json();
-      const toData = (c: any): CoinData => ({ price: c.current_price, change24h: c.price_change_percentage_24h, high24h: c.high_24h, low24h: c.low_24h, volume24h: c.total_volume, marketCap: c.market_cap });
-      return { btc: toData(coins.find((c: any) => c.id === 'bitcoin')), eth: toData(coins.find((c: any) => c.id === 'ethereum')) };
-    };
-    const tryCoinCap = async () => {
-      const [btcRes, ethRes] = await Promise.all([
-        fetch('https://api.coincap.io/v2/assets/bitcoin', { signal: AbortSignal.timeout(6000) }),
-        fetch('https://api.coincap.io/v2/assets/ethereum', { signal: AbortSignal.timeout(6000) }),
-      ]);
-      const btcJ = await btcRes.json(); const ethJ = await ethRes.json();
-      const toData = (d: any): CoinData => ({ price: parseFloat(d.priceUsd), change24h: parseFloat(d.changePercent24Hr), high24h: parseFloat(d.priceUsd) * 1.02, low24h: parseFloat(d.priceUsd) * 0.98, volume24h: parseFloat(d.volumeUsd24Hr), marketCap: parseFloat(d.marketCapUsd) });
-      return { btc: toData(btcJ.data), eth: toData(ethJ.data) };
-    };
-    const tryBinance = async () => {
-      const [btcRes, ethRes, btcStatsRes, ethStatsRes] = await Promise.all([
-        fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', { signal: AbortSignal.timeout(6000) }),
-        fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT', { signal: AbortSignal.timeout(6000) }),
-        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(6000) }),
-        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(6000) }),
-      ]);
-      const [btcP, ethP, btcS, ethS] = await Promise.all([btcRes.json(), ethRes.json(), btcStatsRes.json(), ethStatsRes.json()]);
-      const toData = (p: any, s: any): CoinData => ({ price: parseFloat(p.price), change24h: parseFloat(s.priceChangePercent), high24h: parseFloat(s.highPrice), low24h: parseFloat(s.lowPrice), volume24h: parseFloat(s.volume) * parseFloat(p.price), marketCap: 0 });
-      return { btc: toData(btcP, btcS), eth: toData(ethP, ethS) };
-    };
+    // 先用 REST 获取初始完整数据（含24H高低）
     try {
-      let data: { btc: CoinData; eth: CoinData } | null = null;
-      // 依次尝试三个数据源
-      for (const fn of [tryCoinGecko, tryBinance, tryCoinCap]) {
-        try { data = await fn(); break; } catch { continue; }
-      }
-      if (!data) throw new Error('all sources failed');
-      const fgRes = await fetch('https://api.alternative.me/fng/').catch(() => null);
-      const fgData = fgRes ? await fgRes.json().catch(() => null) : null;
-      setBtc(data.btc); updateMacroWithPrice(data.btc.price, data.btc.change24h);
-      setEth(data.eth);
-      if (fgData?.data?.[0]) setFearGreed({ value: fgData.data[0].value, classification: fgData.data[0].value_classification });
+      const [btcRes, ethRes] = await Promise.all([
+        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(8000) }),
+        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(8000) }),
+      ]);
+      const [btcS, ethS] = await Promise.all([btcRes.json(), ethRes.json()]);
+      const toData = (s: any): CoinData => ({ price: parseFloat(s.lastPrice), change24h: parseFloat(s.priceChangePercent), high24h: parseFloat(s.highPrice), low24h: parseFloat(s.lowPrice), volume24h: parseFloat(s.volume) * parseFloat(s.lastPrice), marketCap: 0 });
+      const btcData = toData(btcS); const ethData = toData(ethS);
+      setBtc(btcData); setEth(ethData);
+      updateMacroWithPrice(btcData.price, btcData.change24h);
       setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setPriceLoading(false);
-    } catch { setPriceLoading(false); }
+    } catch {
+      // Binance REST 失败时用 CoinGecko 备用
+      try {
+        const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&sparkline=false', { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          const coins = await res.json();
+          const toData = (c: any): CoinData => ({ price: c.current_price, change24h: c.price_change_percentage_24h, high24h: c.high_24h, low24h: c.low_24h, volume24h: c.total_volume, marketCap: c.market_cap });
+          const btcRaw = coins.find((c: any) => c.id === 'bitcoin');
+          const ethRaw = coins.find((c: any) => c.id === 'ethereum');
+          if (btcRaw) { setBtc(toData(btcRaw)); updateMacroWithPrice(btcRaw.current_price, btcRaw.price_change_percentage_24h); }
+          if (ethRaw) setEth(toData(ethRaw));
+        }
+      } catch {}
+      setPriceLoading(false);
+    }
+    // 恐惧贪婪指数
+    try {
+      const fgRes = await fetch('https://api.alternative.me/fng/');
+      const fgData = await fgRes.json();
+      if (fgData?.data?.[0]) setFearGreed({ value: fgData.data[0].value, classification: fgData.data[0].value_classification });
+    } catch {}
   }, []);
 
   const updateMacroWithPrice = (price: number, change: number) => {
@@ -240,7 +232,43 @@ export default function App() {
     }));
   };
 
-  useEffect(() => { fetchPrices(); const iv = setInterval(fetchPrices, 30000); return () => clearInterval(iv); }, [fetchPrices]);
+  // WebSocket 实时价格推送
+  useEffect(() => {
+    fetchPrices();
+    // 建立 Binance WebSocket 订阅 BTC+ETH 实时价格
+    let ws: WebSocket | null = null;
+    const connect = () => {
+      try {
+        ws = new WebSocket('wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker');
+        ws.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            const d = msg.data;
+            if (!d) return;
+            const sym = d.s;
+            const toData = (): CoinData => ({ price: parseFloat(d.c), change24h: parseFloat(d.P), high24h: parseFloat(d.h), low24h: parseFloat(d.l), volume24h: parseFloat(d.v) * parseFloat(d.c), marketCap: 0 });
+            if (sym === 'BTCUSDT') { const data = toData(); setBtc(data); updateMacroWithPrice(data.price, data.change24h); }
+            if (sym === 'ETHUSDT') setEth(toData());
+            setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+            setPriceLoading(false);
+          } catch {}
+        };
+        ws.onerror = () => { ws?.close(); };
+        ws.onclose = () => {
+          // WS断开时降级为30秒轮询
+          setTimeout(fetchPrices, 5000);
+        };
+      } catch {
+        // WS不可用时用轮询
+        const iv = setInterval(fetchPrices, 30000);
+        return () => clearInterval(iv);
+      }
+    };
+    connect();
+    // 每10分钟重新获取完整24H数据（高低价等）
+    const iv = setInterval(fetchPrices, 10 * 60 * 1000);
+    return () => { ws?.close(); clearInterval(iv); };
+  }, [fetchPrices]);
 
   // ── Fetch ETF ─────────────────────────────────────────────────────────────
   const fetchEtf = useCallback(async () => {
