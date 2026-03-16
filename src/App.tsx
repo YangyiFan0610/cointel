@@ -183,39 +183,59 @@ export default function App() {
   const cycleColor = monthsSinceHalving >= 12 ? '#fb7185' : monthsSinceHalving >= 6 ? '#fbbf24' : '#34d399';
 
   // ── Fetch prices ──────────────────────────────────────────────────────────
-  // 用 Binance WebSocket 实时推送价格，不轮询，毫秒级更新
   const fetchPrices = useCallback(async () => {
-    // 先用 REST 获取初始完整数据（含24H高低）
-    try {
-      const [btcRes, ethRes] = await Promise.all([
-        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(8000) }),
-        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(8000) }),
-      ]);
-      const [btcS, ethS] = await Promise.all([btcRes.json(), ethRes.json()]);
-      const toData = (s: any): CoinData => ({ price: parseFloat(s.lastPrice), change24h: parseFloat(s.priceChangePercent), high24h: parseFloat(s.highPrice), low24h: parseFloat(s.lowPrice), volume24h: parseFloat(s.volume) * parseFloat(s.lastPrice), marketCap: 0 });
-      const btcData = toData(btcS); const ethData = toData(ethS);
-      setBtc(btcData); setEth(ethData);
-      updateMacroWithPrice(btcData.price, btcData.change24h);
-      setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      setPriceLoading(false);
-    } catch {
-      // Binance REST 失败时用 CoinGecko 备用
+    // 多源轮询：依次尝试 Binance US → Binance → CoinGecko → CoinCap
+    const sources = [
+      async () => {
+        const [b, e] = await Promise.all([
+          fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(5000) }),
+          fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(5000) }),
+        ]);
+        if (!b.ok || !e.ok) throw new Error();
+        const [bs, es] = await Promise.all([b.json(), e.json()]);
+        const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice, marketCap: 0 });
+        return { btc: p(bs), eth: p(es) };
+      },
+      async () => {
+        const [b, e] = await Promise.all([
+          fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(5000) }),
+          fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(5000) }),
+        ]);
+        if (!b.ok || !e.ok) throw new Error();
+        const [bs, es] = await Promise.all([b.json(), e.json()]);
+        const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice, marketCap: 0 });
+        return { btc: p(bs), eth: p(es) };
+      },
+      async () => {
+        const r = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&sparkline=false', { signal: AbortSignal.timeout(6000) });
+        if (!r.ok) throw new Error();
+        const coins = await r.json();
+        const p = (c: any): CoinData => ({ price: c.current_price, change24h: c.price_change_percentage_24h, high24h: c.high_24h, low24h: c.low_24h, volume24h: c.total_volume, marketCap: c.market_cap });
+        return { btc: p(coins.find((c: any) => c.id === 'bitcoin')), eth: p(coins.find((c: any) => c.id === 'ethereum')) };
+      },
+      async () => {
+        const [b, e] = await Promise.all([
+          fetch('https://api.coincap.io/v2/assets/bitcoin', { signal: AbortSignal.timeout(5000) }),
+          fetch('https://api.coincap.io/v2/assets/ethereum', { signal: AbortSignal.timeout(5000) }),
+        ]);
+        const [bj, ej] = await Promise.all([b.json(), e.json()]);
+        const p = (d: any): CoinData => ({ price: +d.priceUsd, change24h: +d.changePercent24Hr, high24h: +d.priceUsd * 1.02, low24h: +d.priceUsd * 0.98, volume24h: +d.volumeUsd24Hr, marketCap: +d.marketCapUsd });
+        return { btc: p(bj.data), eth: p(ej.data) };
+      },
+    ];
+    for (const src of sources) {
       try {
-        const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&sparkline=false', { signal: AbortSignal.timeout(8000) });
-        if (res.ok) {
-          const coins = await res.json();
-          const toData = (c: any): CoinData => ({ price: c.current_price, change24h: c.price_change_percentage_24h, high24h: c.high_24h, low24h: c.low_24h, volume24h: c.total_volume, marketCap: c.market_cap });
-          const btcRaw = coins.find((c: any) => c.id === 'bitcoin');
-          const ethRaw = coins.find((c: any) => c.id === 'ethereum');
-          if (btcRaw) { setBtc(toData(btcRaw)); updateMacroWithPrice(btcRaw.current_price, btcRaw.price_change_percentage_24h); }
-          if (ethRaw) setEth(toData(ethRaw));
-        }
-      } catch {}
-      setPriceLoading(false);
+        const { btc: btcData, eth: ethData } = await src();
+        if (!btcData?.price || isNaN(btcData.price)) continue;
+        setBtc(btcData); setEth(ethData);
+        updateMacroWithPrice(btcData.price, btcData.change24h);
+        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        setPriceLoading(false);
+        break;
+      } catch { continue; }
     }
-    // 恐惧贪婪指数
     try {
-      const fgRes = await fetch('https://api.alternative.me/fng/');
+      const fgRes = await fetch('https://api.alternative.me/fng/', { signal: AbortSignal.timeout(5000) });
       const fgData = await fgRes.json();
       if (fgData?.data?.[0]) setFearGreed({ value: fgData.data[0].value, classification: fgData.data[0].value_classification });
     } catch {}
@@ -232,42 +252,11 @@ export default function App() {
     }));
   };
 
-  // WebSocket 实时价格推送
+  // 每5秒轮询 Binance REST，稳定可靠
   useEffect(() => {
     fetchPrices();
-    // 建立 Binance WebSocket 订阅 BTC+ETH 实时价格
-    let ws: WebSocket | null = null;
-    const connect = () => {
-      try {
-        ws = new WebSocket('wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker');
-        ws.onmessage = (e) => {
-          try {
-            const msg = JSON.parse(e.data);
-            const d = msg.data;
-            if (!d) return;
-            const sym = d.s;
-            const toData = (): CoinData => ({ price: parseFloat(d.c), change24h: parseFloat(d.P), high24h: parseFloat(d.h), low24h: parseFloat(d.l), volume24h: parseFloat(d.v) * parseFloat(d.c), marketCap: 0 });
-            if (sym === 'BTCUSDT') { const data = toData(); setBtc(data); updateMacroWithPrice(data.price, data.change24h); }
-            if (sym === 'ETHUSDT') setEth(toData());
-            setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-            setPriceLoading(false);
-          } catch {}
-        };
-        ws.onerror = () => { ws?.close(); };
-        ws.onclose = () => {
-          // WS断开时降级为30秒轮询
-          setTimeout(fetchPrices, 5000);
-        };
-      } catch {
-        // WS不可用时用轮询
-        const iv = setInterval(fetchPrices, 30000);
-        return () => clearInterval(iv);
-      }
-    };
-    connect();
-    // 每10分钟重新获取完整24H数据（高低价等）
-    const iv = setInterval(fetchPrices, 10 * 60 * 1000);
-    return () => { ws?.close(); clearInterval(iv); };
+    const iv = setInterval(fetchPrices, 5000);
+    return () => clearInterval(iv);
   }, [fetchPrices]);
 
   // ── Fetch ETF ─────────────────────────────────────────────────────────────
@@ -413,201 +402,267 @@ export default function App() {
 
           {/* ══ HOME ══════════════════════════════════════════════════════════ */}
           {activeTab === 'home' && (
-            <motion.div key="home" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <motion.div key="home" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-              {/* 四维评分 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              {/* ── 四维评分 ── */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
                 {[
                   { label: '宏观环境', value: sigLabel(macroSignal, ['偏多', '偏空', '中性']), sub: macroSignal === 'bearish' ? '降息推迟' : macroSignal === 'bullish' ? '降息预期' : '信号混合', sig: macroSignal },
                   { label: 'BTC基本面', value: cyclePhase, sub: `减半后${monthsSinceHalving}个月`, sig: btcFundSignal },
                   { label: '市场情绪', value: fearGreed?.classification || '加载中', sub: `指数 ${fearGreed?.value || '--'}`, sig: sentimentSignal },
-                  { label: '资金流向', value: etfTotal > 0 ? '净流入' : etfTotal < 0 ? '净流出' : '中性', sub: `ETF ${etfTotal >= 0 ? '+' : ''}$${Math.abs(etfTotal)}M`, sig: flowSignal },
+                  { label: 'ETF资金', value: etfTotal > 0 ? '净流入' : etfTotal < 0 ? '净流出' : '中性', sub: `${etfTotal >= 0 ? '+' : ''}$${Math.abs(etfTotal)}M`, sig: flowSignal },
                 ].map((item, i) => (
-                  <div key={i} style={{ background: sigBg(item.sig), border: `0.5px solid ${sigBorder(item.sig)}`, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
-                    <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', marginBottom: 5, fontWeight: 500 }}>{item.label}</p>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: sigColor(item.sig), marginBottom: 3 }}>{item.value}</p>
-                    <p style={{ fontSize: 9, color: sigColor(item.sig), opacity: 0.7 }}>{item.sub}</p>
+                  <div key={i} style={{ background: sigBg(item.sig), border: `0.5px solid ${sigBorder(item.sig)}`, borderRadius: 12, padding: '14px 16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8, fontWeight: 500 }}>{item.label}</p>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: sigColor(item.sig), marginBottom: 5 }}>{item.value}</p>
+                    <p style={{ fontSize: 10, color: sigColor(item.sig), opacity: 0.65 }}>{item.sub}</p>
                   </div>
                 ))}
               </div>
 
-              {/* 价格行 */}
+              {/* ── 价格 ── */}
               {priceLoading ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                  {[0,1,2].map(i => <div key={i} style={{ ...cardS, height: 130 }} className="animate-pulse" />)}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  {[0,1].map(i => <div key={i} style={{ ...cardS, height: 150 }} className="animate-pulse" />)}
                 </div>
               ) : btc && eth ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <PriceCard sym="BTC" data={btc} />
                   <PriceCard sym="ETH" data={eth} />
-                  <div style={{ ...cardS, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                    <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', fontWeight: 500 }}>恐惧贪婪指数</p>
-                    <p style={{ fontSize: 32, fontWeight: 700, color: fgColor }}>{fearGreed?.value || '—'}</p>
-                    <p style={{ fontSize: 10, fontWeight: 600, color: fgColor }}>{fearGreed?.classification || '加载中'}</p>
-                    <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', textAlign: 'center', lineHeight: 1.4, marginTop: 4 }}>
-                      {fgVal >= 75 ? '极度贪婪，历史上此区间常出现回调' : fgVal >= 55 ? '贪婪区间，注意高位风险' : fgVal <= 25 ? '极度恐惧，历史上是买入良机' : '中性区间，等待明确信号'}
-                    </p>
-                  </div>
                 </div>
               ) : (
-                <div style={{ ...cardS, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>价格加载失败，请刷新</div>
+                <div style={{ ...cardS, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 13, padding: 30 }}>价格加载失败，请刷新</div>
               )}
 
-              {/* 宏观指标 */}
-              <div>
-                <div style={sectionLabel}>
-                  <span>宏观指标</span>
-                  <div style={{ flex: 1, height: '0.5px', background: 'rgba(255,255,255,0.08)' }} />
-                  <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', letterSpacing: 0, textTransform: 'none', fontWeight: 400 }}>点击名称跳转数据源</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {macroIndicators.map((m, i) => (
-                    <div key={i} style={{ ...cardS, padding: 12 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                        <div>
-                          <a href={m.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 500, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            {m.name} <ExternalLink size={9} />
-                          </a>
-                          <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', marginTop: 2 }}>{m.nameEn}</p>
-                        </div>
-                        <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 5, fontWeight: 600, flexShrink: 0, marginLeft: 8, background: m.signal === 'bearish' ? 'rgba(251,113,133,0.15)' : m.signal === 'bullish' ? 'rgba(52,211,153,0.15)' : 'rgba(251,191,36,0.15)', color: m.signal === 'bearish' ? '#fb7185' : m.signal === 'bullish' ? '#34d399' : '#fbbf24' }}>
-                          {m.badge}
-                        </span>
+              {/* ── 恐惧贪婪 单独一行 ── */}
+              {fearGreed && (
+                <div style={{ ...cardS, display: 'flex', alignItems: 'center', gap: 24, padding: '20px 24px' }}>
+                  <div style={{ flexShrink: 0 }}>
+                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 4 }}>恐惧贪婪指数</p>
+                    <p style={{ fontSize: 42, fontWeight: 700, color: fgColor, lineHeight: 1 }}>{fearGreed.value}</p>
+                  </div>
+                  <div style={{ width: '0.5px', height: 60, background: 'rgba(255,255,255,0.08)', flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: 16, fontWeight: 700, color: fgColor, marginBottom: 6 }}>{fearGreed.classification}</p>
+                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.6 }}>
+                      {fgVal >= 75 ? '极度贪婪区间。历史规律：市场狂热时往往接近顶部，是减仓而非加仓的时机。' : fgVal >= 55 ? '贪婪区间。市场情绪偏热，注意高位追涨风险，等待回调机会。' : fgVal <= 25 ? '极度恐惧区间。历史上每次BTC大底部都伴随极度恐惧，是分批建仓的参考信号之一。' : fgVal <= 45 ? '恐惧区间。情绪偏悲观，但还未到极值，继续观察。' : '中性区间，市场情绪平衡，等待更明确的方向信号。'}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+                    {[{v:75,l:'极度贪婪'},{v:55,l:'贪婪'},{v:45,l:'中性'},{v:25,l:'恐惧'},{v:0,l:'极度恐惧'}].map((z, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: fgVal >= z.v ? fgColor : 'rgba(255,255,255,0.1)', flexShrink: 0 }} />
+                        <span style={{ fontSize: 9, color: fgVal >= z.v ? fgColor : 'rgba(255,255,255,0.25)' }}>{z.l}</span>
                       </div>
-                      <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', lineHeight: 1.5, padding: '6px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 6 }}>
-                        {m.logic}
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── 宏观指标（可折叠） ── */}
+              {(() => {
+                const [open, setOpen] = React.useState(true);
+                return (
+                  <div style={cardS}>
+                    <button onClick={() => setOpen(o => !o)} style={{ width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0, marginBottom: open ? 16 : 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>宏观指标</span>
+                        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', fontWeight: 400 }}>点击名称跳转数据源</span>
                       </div>
-                      <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', marginTop: 5, display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <ExternalLink size={8} /> 数据来源：{m.source}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* BTC自身基本面 */}
-              <div>
-                <div style={sectionLabel}>
-                  <span>BTC 自身基本面</span>
-                  <div style={{ flex: 1, height: '0.5px', background: 'rgba(255,255,255,0.08)' }} />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
-                  {[
-                    { label: '4年周期位置', value: cyclePhase, sub: `减半后第${monthsSinceHalving}个月`, color: cycleColor, note: '历史上顶部在减半后12-18个月，当前处于回调期' },
-                    { label: '下次减半', value: `${daysToNextHalving}天`, sub: '2028年3月预计', color: '#a78bfa', note: '减半后矿工收入减半，初期抛压增加，长期供给减少' },
-                    { label: '矿工关机价', value: '~$44,000', sub: '当前价格安全', color: '#34d399', note: '低于关机价矿工被迫卖出，高于则无强制抛压' },
-                    { label: '当前奖励', value: '3.125 BTC', sub: '每个区块', color: '#fbbf24', note: '2024年减半后每块奖励，供给通缩持续' },
-                  ].map((item, i) => (
-                    <div key={i} style={{ ...cardS, padding: 12 }}>
-                      <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', marginBottom: 5, fontWeight: 500 }}>{item.label}</p>
-                      <p style={{ fontSize: 16, fontWeight: 700, color: item.color, marginBottom: 3 }}>{item.value}</p>
-                      <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginBottom: 6 }}>{item.sub}</p>
-                      <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', lineHeight: 1.4 }}>{item.note}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* 市场情绪 + 资金流向 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <div style={cardS}>
-                  <div style={sectionLabel}>市场情绪</div>
-                  {[
-                    { name: '恐惧贪婪指数', value: fearGreed ? `${fearGreed.value} · ${fearGreed.classification}` : '加载中', color: fgColor, logic: fgVal >= 75 ? '极度贪婪，注意高位风险' : fgVal <= 25 ? '极度恐惧，历史上是买入良机' : '中性区间，等待信号' },
-                    { name: '多空比', value: '1.08 · 多头占优', color: '#34d399', logic: '多头略占优，但不是强烈信号' },
-                    { name: '资金费率', value: '0.01% · 中性', color: '#94a3b8', logic: '中性，无明显多空倾斜' },
-                  ].map((item, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '8px 0', borderBottom: i < 2 ? '0.5px solid rgba(255,255,255,0.06)' : 'none' }}>
-                      <div>
-                        <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginBottom: 2 }}>{item.name}</p>
-                        <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>{item.logic}</p>
-                      </div>
-                      <p style={{ fontSize: 11, fontWeight: 600, color: item.color, flexShrink: 0, marginLeft: 8 }}>{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={cardS}>
-                  <div style={sectionLabel}>
-                    <span>ETF 资金流向</span>
-                    <div style={{ flex: 1, height: '0.5px', background: 'rgba(255,255,255,0.08)' }} />
-                    <a href="https://farside.co.uk/bitcoin" target="_blank" rel="noreferrer" style={{ fontSize: 9, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3, letterSpacing: 0, textTransform: 'none', fontWeight: 400 }}>farside.co.uk <ExternalLink size={8} /></a>
-                  </div>
-                  {etfData.map((e, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
-                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>{e.name}</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: e.flow >= 0 ? '#34d399' : '#fb7185' }}>{e.flow >= 0 ? '+' : ''}${e.flow.toLocaleString()}M</span>
-                    </div>
-                  ))}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, marginTop: 4, borderTop: '0.5px solid rgba(255,255,255,0.1)' }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: '#fff' }}>今日合计</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: etfTotal >= 0 ? '#34d399' : '#fb7185' }}>{etfTotal >= 0 ? '+' : ''}${etfTotal.toLocaleString()}M</span>
-                  </div>
-                  <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, fontSize: 9, lineHeight: 1.4, background: etfTotal > 0 ? 'rgba(52,211,153,0.07)' : etfTotal < 0 ? 'rgba(251,113,133,0.07)' : 'rgba(255,255,255,0.04)', color: etfTotal > 0 ? '#34d399' : etfTotal < 0 ? '#fb7185' : '#94a3b8' }}>
-                    {etfTotal > 200 ? '机构持续买入 → 需求增加 → 供需改善，看多信号' : etfTotal < -200 ? '机构在减仓 → 买入力量减弱 → 价格支撑减少' : '资金流向中性，等待明确方向'}
-                  </div>
-                </div>
-              </div>
-
-              {/* 今日最重要信号 */}
-              <div style={cardS}>
-                <div style={{ ...sectionLabel, marginBottom: 12 }}>
-                  <span>今日最重要信号</span>
-                  <div style={{ flex: 1, height: '0.5px', background: 'rgba(255,255,255,0.08)' }} />
-                  <span style={{ fontSize: 9, color: '#f97316', cursor: 'pointer', letterSpacing: 0, textTransform: 'none', fontWeight: 500 }} onClick={() => setActiveTab('intel')}>查看全部 →</span>
-                </div>
-                {intelLoading ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {[0,1,2].map(i => <div key={i} style={{ height: 50, background: 'rgba(255,255,255,0.05)', borderRadius: 8 }} className="animate-pulse" />)}
-                  </div>
-                ) : topIntel.length === 0 ? (
-                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '12px 0' }}>暂无高影响信号</p>
-                ) : (
-                  <div>
-                    {topIntel.map((item, idx) => {
-                      const dim = DIMENSIONS[item.dimension];
-                      const isExp = expandedIntel === item.id;
-                      return (
-                        <div key={item.id} style={{ borderBottom: idx < topIntel.length - 1 ? '0.5px solid rgba(255,255,255,0.06)' : 'none' }}>
-                          <div style={{ display: 'flex', gap: 10, padding: '10px 0', cursor: 'pointer', alignItems: 'flex-start' }} onClick={() => setExpandedIntel(isExp ? null : item.id)}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', minWidth: 18, paddingTop: 1 }}>{item.impactScore}</span>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginBottom: 3 }}>
-                                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', lineHeight: 1.4, flex: 1 }}>{item.title}</span>
-                                <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, fontWeight: 600, flexShrink: 0 }} className={`${dim.bg} ${dim.color}`}>{dim.label}</span>
-                                <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, fontWeight: 600, flexShrink: 0, background: item.sentiment === 'bullish' ? 'rgba(52,211,153,0.15)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.15)' : 'rgba(255,255,255,0.08)', color: item.sentiment === 'bullish' ? '#34d399' : item.sentiment === 'bearish' ? '#fb7185' : '#94a3b8' }}>
-                                  {item.sentiment === 'bullish' ? '看涨' : item.sentiment === 'bearish' ? '看跌' : '中性'}
-                                </span>
-                              </div>
-                              <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', lineHeight: 1.4 }}>{item.whyBTC}</p>
-                            </div>
-                            <div style={{ color: 'rgba(255,255,255,0.25)', flexShrink: 0, paddingTop: 2 }}>{isExp ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</div>
-                          </div>
-                          <AnimatePresence>
-                            {isExp && (
-                              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }} style={{ overflow: 'hidden' }}>
-                                <div style={{ paddingBottom: 12, paddingLeft: 28 }}>
-                                  <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 12, marginBottom: 8 }}>
-                                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 5 }}>原文摘要</p>
-                                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>{item.summary}</p>
+                      <div style={{ color: 'rgba(255,255,255,0.3)' }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</div>
+                    </button>
+                    <AnimatePresence>
+                      {open && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} style={{ overflow: 'hidden' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {macroIndicators.map((m, i) => (
+                              <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 14, border: '0.5px solid rgba(255,255,255,0.07)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                                  <div>
+                                    <a href={m.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 500, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      {m.name} <ExternalLink size={9} />
+                                    </a>
+                                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', marginTop: 2 }}>{m.nameEn}</p>
                                   </div>
-                                  <div style={{ background: item.sentiment === 'bullish' ? 'rgba(52,211,153,0.08)' : 'rgba(251,113,133,0.08)', border: `0.5px solid ${item.sentiment === 'bullish' ? 'rgba(52,211,153,0.25)' : 'rgba(251,113,133,0.25)'}`, borderRadius: 10, padding: 12, marginBottom: 8 }}>
-                                    <p style={{ fontSize: 10, color: item.sentiment === 'bullish' ? '#34d399' : '#fb7185', marginBottom: 4 }}>对 BTC 的影响逻辑</p>
-                                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>{item.whyBTC}</p>
-                                  </div>
-                                  <a href={item.link} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-                                    <ExternalLink size={9} /> 阅读原文
-                                  </a>
+                                  <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 5, fontWeight: 600, flexShrink: 0, marginLeft: 8, background: m.signal === 'bearish' ? 'rgba(251,113,133,0.15)' : m.signal === 'bullish' ? 'rgba(52,211,153,0.15)' : 'rgba(251,191,36,0.15)', color: m.signal === 'bearish' ? '#fb7185' : m.signal === 'bullish' ? '#34d399' : '#fbbf24' }}>
+                                    {m.badge}
+                                  </span>
                                 </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      );
-                    })}
+                                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', lineHeight: 1.6, padding: '8px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 7 }}>
+                                  {m.logic}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                )}
-              </div>
+                );
+              })()}
+
+              {/* ── BTC基本面（可折叠） ── */}
+              {(() => {
+                const [open, setOpen] = React.useState(true);
+                return (
+                  <div style={cardS}>
+                    <button onClick={() => setOpen(o => !o)} style={{ width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0, marginBottom: open ? 16 : 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>BTC 自身基本面</span>
+                      <div style={{ color: 'rgba(255,255,255,0.3)' }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</div>
+                    </button>
+                    <AnimatePresence>
+                      {open && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} style={{ overflow: 'hidden' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {[
+                              { label: '4年周期位置', value: cyclePhase, sub: `减半后第 ${monthsSinceHalving} 个月`, color: cycleColor, note: '历史顶部在减半后12-18个月。当前已过18个月，处于回调期，这轮有ETF机构资金，底部可能比历史更高。' },
+                              { label: '下次减半倒计时', value: `${daysToNextHalving} 天`, sub: '预计 2028年3月', color: '#a78bfa', note: '减半 = 矿工每块奖励减半。供给减少，若需求不变，价格长期受支撑。历史上每次减半后12-18个月出现新高。' },
+                              { label: '矿工关机价', value: '~$44,000', sub: btc ? (btc.price > 44000 ? `当前 $${btc.price.toLocaleString(undefined,{maximumFractionDigits:0})} · 安全区` : '⚠ 价格低于关机价') : '当前价格安全', color: '#34d399', note: '主流矿机平均生产成本约$44,000。价格高于此位，矿工有利润不急于卖出，低于则被迫抛售。' },
+                              { label: '当前区块奖励', value: '3.125 BTC', sub: '2024年4月减半后', color: '#fbbf24', note: '每约10分钟产出3.125枚BTC。全球2100万枚上限，约在2140年全部挖完，绝对稀缺。' },
+                            ].map((item, i) => (
+                              <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 14, border: '0.5px solid rgba(255,255,255,0.07)' }}>
+                                <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 6, fontWeight: 500 }}>{item.label}</p>
+                                <p style={{ fontSize: 22, fontWeight: 700, color: item.color, marginBottom: 3 }}>{item.value}</p>
+                                <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 10 }}>{item.sub}</p>
+                                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.6, borderTop: '0.5px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>{item.note}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })()}
+
+              {/* ── 市场情绪 + ETF（可折叠） ── */}
+              {(() => {
+                const [open, setOpen] = React.useState(true);
+                return (
+                  <div style={cardS}>
+                    <button onClick={() => setOpen(o => !o)} style={{ width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0, marginBottom: open ? 16 : 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>市场情绪 & 资金流向</span>
+                      <div style={{ color: 'rgba(255,255,255,0.3)' }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</div>
+                    </button>
+                    <AnimatePresence>
+                      {open && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} style={{ overflow: 'hidden' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 14, border: '0.5px solid rgba(255,255,255,0.07)' }}>
+                              <p style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.5)', marginBottom: 12 }}>市场情绪指标</p>
+                              {[
+                                { name: '恐惧贪婪指数', value: fearGreed ? `${fearGreed.value} · ${fearGreed.classification}` : '加载中', color: fgColor, note: '0=极度恐惧（买入机会），100=极度贪婪（注意回调）' },
+                                { name: '多空比', value: '1.08 · 多头占优', color: '#34d399', note: '多于1代表多头更多，小幅多头，信号不强' },
+                                { name: '资金费率', value: '0.01% · 中性', color: '#94a3b8', note: '正数代表多头付费，负数代表空头付费，过高或过低都是警示' },
+                              ].map((item, i) => (
+                                <div key={i} style={{ padding: '10px 0', borderBottom: i < 2 ? '0.5px solid rgba(255,255,255,0.06)' : 'none' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)' }}>{item.name}</span>
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: item.color }}>{item.value}</span>
+                                  </div>
+                                  <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', lineHeight: 1.4 }}>{item.note}</p>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 14, border: '0.5px solid rgba(255,255,255,0.07)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                <p style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.5)' }}>ETF 资金流向</p>
+                                <a href="https://farside.co.uk/bitcoin" target="_blank" rel="noreferrer" style={{ fontSize: 9, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}>farside.co.uk <ExternalLink size={8} /></a>
+                              </div>
+                              {etfData.map((e, i) => (
+                                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
+                                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{e.name}</span>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: e.flow >= 0 ? '#34d399' : '#fb7185' }}>{e.flow >= 0 ? '+' : ''}${e.flow.toLocaleString()}M</span>
+                                </div>
+                              ))}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, marginTop: 4, borderTop: '0.5px solid rgba(255,255,255,0.1)' }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>今日合计</span>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: etfTotal >= 0 ? '#34d399' : '#fb7185' }}>{etfTotal >= 0 ? '+' : ''}${etfTotal.toLocaleString()}M</span>
+                              </div>
+                              <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, fontSize: 11, lineHeight: 1.5, background: etfTotal > 0 ? 'rgba(52,211,153,0.07)' : etfTotal < 0 ? 'rgba(251,113,133,0.07)' : 'rgba(255,255,255,0.04)', color: etfTotal > 0 ? '#34d399' : etfTotal < 0 ? '#fb7185' : '#94a3b8' }}>
+                                {etfTotal > 200 ? '机构持续买入 → 需求增加 → 供需改善，看多信号' : etfTotal < -200 ? '机构在减仓 → 买入力量减弱 → 价格支撑减少' : '资金流向中性，等待明确方向'}
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })()}
+
+              {/* ── 今日最重要信号（可折叠） ── */}
+              {(() => {
+                const [open, setOpen] = React.useState(true);
+                return (
+                  <div style={cardS}>
+                    <button onClick={() => setOpen(o => !o)} style={{ width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0, marginBottom: open ? 16 : 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>今日最重要信号</span>
+                        <span style={{ fontSize: 9, color: '#f97316', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setActiveTab('intel'); }}>查看全部 →</span>
+                      </div>
+                      <div style={{ color: 'rgba(255,255,255,0.3)' }}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</div>
+                    </button>
+                    <AnimatePresence>
+                      {open && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} style={{ overflow: 'hidden' }}>
+                          {intelLoading ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {[0,1,2].map(i => <div key={i} style={{ height: 60, background: 'rgba(255,255,255,0.05)', borderRadius: 8 }} className="animate-pulse" />)}
+                            </div>
+                          ) : topIntel.length === 0 ? (
+                            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '16px 0' }}>暂无高影响信号</p>
+                          ) : (
+                            <div>
+                              {topIntel.map((item, idx) => {
+                                const dim = DIMENSIONS[item.dimension];
+                                const isExp = expandedIntel === item.id;
+                                return (
+                                  <div key={item.id} style={{ borderBottom: idx < topIntel.length - 1 ? '0.5px solid rgba(255,255,255,0.06)' : 'none' }}>
+                                    <div style={{ display: 'flex', gap: 12, padding: '12px 0', cursor: 'pointer', alignItems: 'flex-start' }} onClick={() => setExpandedIntel(isExp ? null : item.id)}>
+                                      <span style={{ fontSize: 14, fontWeight: 700, color: '#fbbf24', minWidth: 20, paddingTop: 1 }}>{item.impactScore}</span>
+                                      <div style={{ flex: 1 }}>
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 5 }}>
+                                          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', lineHeight: 1.4, flex: 1 }}>{item.title}</span>
+                                          <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }} className={`${dim.bg} ${dim.color}`}>{dim.label}</span>
+                                          <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap', background: item.sentiment === 'bullish' ? 'rgba(52,211,153,0.15)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.15)' : 'rgba(255,255,255,0.08)', color: item.sentiment === 'bullish' ? '#34d399' : item.sentiment === 'bearish' ? '#fb7185' : '#94a3b8' }}>
+                                            {item.sentiment === 'bullish' ? '看涨' : item.sentiment === 'bearish' ? '看跌' : '中性'}
+                                          </span>
+                                        </div>
+                                        <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.5 }}>{item.whyBTC}</p>
+                                      </div>
+                                      <div style={{ color: 'rgba(255,255,255,0.25)', flexShrink: 0, paddingTop: 2 }}>{isExp ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</div>
+                                    </div>
+                                    <AnimatePresence>
+                                      {isExp && (
+                                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }} style={{ overflow: 'hidden' }}>
+                                          <div style={{ paddingBottom: 14, paddingLeft: 32 }}>
+                                            <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 14, marginBottom: 10 }}>
+                                              <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>原文摘要</p>
+                                              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}>{item.summary}</p>
+                                            </div>
+                                            <div style={{ background: item.sentiment === 'bullish' ? 'rgba(52,211,153,0.08)' : 'rgba(251,113,133,0.08)', border: `0.5px solid ${item.sentiment === 'bullish' ? 'rgba(52,211,153,0.25)' : 'rgba(251,113,133,0.25)'}`, borderRadius: 10, padding: 14, marginBottom: 10 }}>
+                                              <p style={{ fontSize: 10, color: item.sentiment === 'bullish' ? '#34d399' : '#fb7185', marginBottom: 5 }}>对 BTC 的影响逻辑</p>
+                                              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}>{item.whyBTC}</p>
+                                            </div>
+                                            <a href={item.link} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                                              <ExternalLink size={9} /> 阅读原文
+                                            </a>
+                                          </div>
+                                        </motion.div>
+                                      )}
+                                    </AnimatePresence>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })()}
 
             </motion.div>
           )}
