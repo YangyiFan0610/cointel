@@ -513,56 +513,82 @@ export default function App() {
           )}
 
           {tab === 'intel' && (
-            <motion.div key="intel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <motion.div key="intel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-              {/* 刷新按钮 */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
-                  <p style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>今日情报</p>
-                  <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>按影响BTC的程度排序，每5分钟更新</p>
+                  <p style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 3 }}>今日情报</p>
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>按影响BTC的程度排序 · 每5分钟更新</p>
                 </div>
-                <button onClick={fetchIntel} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 8, cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 11 }}>
+                <button onClick={fetchIntel} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: 'rgba(249,115,22,0.12)', border: '0.5px solid rgba(249,115,22,0.3)', borderRadius: 10, cursor: 'pointer', color: '#f97316', fontSize: 12, fontWeight: 600 }}>
                   <RefreshCw size={11} className={intelLoading ? 'animate-spin' : ''} /> 刷新
                 </button>
               </div>
 
               {intelLoading ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {[0,1,2,3,4].map(i => <div key={i} style={{ height: 72, background: 'rgba(255,255,255,0.05)', borderRadius: 10 }} className="animate-pulse" />)}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[0,1,2,3].map(i => <div key={i} style={{ height: 80, background: 'rgba(255,255,255,0.05)', borderRadius: 12 }} className="animate-pulse" />)}
                 </div>
               ) : (() => {
                 const high = intel.filter(i => i.impactScore >= 8);
                 const mid = intel.filter(i => i.impactScore >= 5 && i.impactScore < 8);
                 const low = intel.filter(i => i.impactScore < 5);
 
-                const IntelRow = ({ item, idx }: { item: IntelItem; idx: number }) => {
+                const IntelRow = ({ item }: { item: IntelItem }) => {
                   const isExp = expandedId === item.id;
+                  const isHigh = item.impactScore >= 8;
+                  const isMid = item.impactScore >= 5 && item.impactScore < 8;
                   const sentColor = item.sentiment === 'bullish' ? '#34d399' : item.sentiment === 'bearish' ? '#fb7185' : '#94a3b8';
-                  const sentLabel = item.sentiment === 'bullish' ? '▲ 看涨' : item.sentiment === 'bearish' ? '▼ 看跌' : '→ 中性';
+                  const sentBg = item.sentiment === 'bullish' ? 'rgba(52,211,153,0.08)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.08)' : 'rgba(148,163,184,0.06)';
+                  const borderColor = isHigh
+                    ? (item.sentiment === 'bullish' ? 'rgba(52,211,153,0.35)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.35)' : 'rgba(251,113,133,0.25)')
+                    : isMid
+                    ? 'rgba(251,191,36,0.2)'
+                    : 'rgba(255,255,255,0.07)';
+                  const cardBg = isHigh
+                    ? (item.sentiment === 'bullish' ? 'rgba(52,211,153,0.06)' : 'rgba(251,113,133,0.06)')
+                    : isMid ? 'rgba(251,191,36,0.04)' : '#16213e';
+
                   return (
-                    <div key={item.id} style={{ background: '#16213e', border: `0.5px solid ${item.sentiment === 'bullish' ? 'rgba(52,211,153,0.2)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.2)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, overflow: 'hidden' }}>
-                      <div style={{ padding: '12px 14px', cursor: 'pointer' }} onClick={() => setExpandedId(isExp ? null : item.id)}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                          <div style={{ minWidth: 28, height: 28, borderRadius: 7, background: item.impactScore >= 8 ? 'rgba(251,113,133,0.15)' : 'rgba(251,191,36,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: item.impactScore >= 8 ? '#fb7185' : '#fbbf24' }}>{item.impactScore}</span>
+                    <div style={{ background: cardBg, border: `0.5px solid ${borderColor}`, borderRadius: 12, overflow: 'hidden', transition: 'all 0.15s' }}>
+                      <div style={{ padding: '14px 16px', cursor: 'pointer' }} onClick={() => setExpandedId(isExp ? null : item.id)}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                          {/* 评分圆圈 */}
+                          <div style={{ width: 36, height: 36, borderRadius: 10, background: isHigh ? (item.sentiment === 'bullish' ? 'rgba(52,211,153,0.2)' : 'rgba(251,113,133,0.2)') : isMid ? 'rgba(251,191,36,0.2)' : 'rgba(148,163,184,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: isHigh ? sentColor : isMid ? '#fbbf24' : '#94a3b8' }}>{item.impactScore}</span>
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontSize: 12, fontWeight: 600, color: '#fff', lineHeight: 1.4, marginBottom: 4 }}>{item.title}</p>
-                            <p style={{ fontSize: 11, color: sentColor, lineHeight: 1.4 }}>{sentLabel} — {item.whyBTC}</p>
+                            {/* 标题 */}
+                            <p style={{ fontSize: 13, fontWeight: 600, color: isHigh ? '#fff' : 'rgba(255,255,255,0.8)', lineHeight: 1.4, marginBottom: 6 }}>{item.title}</p>
+                            {/* 结论 */}
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: sentColor, flexShrink: 0 }}>
+                                {item.sentiment === 'bullish' ? '▲ 看涨' : item.sentiment === 'bearish' ? '▼ 看跌' : '→ 中性'}
+                              </span>
+                              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>{item.whyBTC}</span>
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)' }}>{item.source}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                            <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)' }}>{item.source}</span>
                             <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)' }}>{item.time}</span>
+                            <span style={{ fontSize: 9, color: isExp ? sentColor : 'rgba(255,255,255,0.25)' }}>{isExp ? '收起 ↑' : '详情 ↓'}</span>
                           </div>
                         </div>
                       </div>
                       <AnimatePresence>
                         {isExp && (
-                          <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} transition={{ duration: 0.15 }} style={{ overflow: 'hidden' }}>
-                            <div style={{ padding: '0 14px 12px', borderTop: '0.5px solid rgba(255,255,255,0.06)' }}>
-                              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6, marginTop: 10, marginBottom: 8 }}>{item.summary}</p>
-                              <a href={item.link} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <ExternalLink size={9} /> 阅读原文
+                          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} style={{ overflow: 'hidden' }}>
+                            <div style={{ margin: '0 16px 14px', padding: 14, background: 'rgba(0,0,0,0.2)', borderRadius: 10, borderTop: `0.5px solid ${borderColor}` }}>
+                              <p style={{ fontSize: 10, color: sentColor, fontWeight: 600, marginBottom: 6 }}>逻辑链分析</p>
+                              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.7, marginBottom: 10 }}>{item.whyBTC}</p>
+                              {item.summary && (
+                                <>
+                                  <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: 600, marginBottom: 6 }}>原文摘要</p>
+                                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6, marginBottom: 10 }}>{item.summary}</p>
+                                </>
+                              )}
+                              <a href={item.link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <ExternalLink size={10} /> 阅读原文
                               </a>
                             </div>
                           </motion.div>
@@ -573,48 +599,46 @@ export default function App() {
                 };
 
                 return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {/* 高影响 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                     {high.length > 0 && (
                       <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fb7185' }} />
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#fb7185' }}>高影响 · {high.length}条</span>
-                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>评分 8-10</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 12px', background: 'rgba(251,113,133,0.08)', borderRadius: 8, border: '0.5px solid rgba(251,113,133,0.2)' }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fb7185', boxShadow: '0 0 8px #fb7185' }} />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#fb7185' }}>高影响</span>
+                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{high.length} 条 · 评分 8–10 · 需要关注</span>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {high.map((item, i) => <IntelRow key={item.id} item={item} idx={i} />)}
+                          {high.map(item => <IntelRow key={item.id} item={item} />)}
                         </div>
                       </div>
                     )}
 
-                    {/* 中影响 */}
                     {mid.length > 0 && (
                       <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 12px', background: 'rgba(251,191,36,0.06)', borderRadius: 8, border: '0.5px solid rgba(251,191,36,0.2)' }}>
                           <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fbbf24' }} />
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24' }}>中影响 · {mid.length}条</span>
-                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>评分 5-7</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24' }}>中影响</span>
+                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{mid.length} 条 · 评分 5–7 · 可关注</span>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {mid.map((item, i) => <IntelRow key={item.id} item={item} idx={i} />)}
+                          {mid.map(item => <IntelRow key={item.id} item={item} />)}
                         </div>
                       </div>
                     )}
 
-                    {/* 低影响折叠 */}
                     {low.length > 0 && (
                       <div>
-                        <button onClick={() => setExpandedId(expandedId === 'low-section' ? null : 'low-section')} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, marginBottom: expandedId === 'low-section' ? 10 : 0 }}>
+                        <button onClick={() => setExpandedId(expandedId === 'low-section' ? null : 'low-section')} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: expandedId === 'low-section' ? 10 : 0, padding: '8px 12px', background: 'rgba(148,163,184,0.05)', borderRadius: 8, border: '0.5px solid rgba(148,163,184,0.15)', cursor: 'pointer', width: '100%' }}>
                           <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#94a3b8' }} />
-                          <span style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8' }}>低影响 · {low.length}条</span>
-                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>{expandedId === 'low-section' ? '收起 ↑' : '展开 ↓'}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>低影响</span>
+                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{low.length} 条 · 评分 1–4</span>
+                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', marginLeft: 'auto' }}>{expandedId === 'low-section' ? '收起 ↑' : '展开查看 ↓'}</span>
                         </button>
                         <AnimatePresence>
                           {expandedId === 'low-section' && (
                             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} style={{ overflow: 'hidden' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                {low.map((item, i) => <IntelRow key={item.id} item={item} idx={i} />)}
+                                {low.map(item => <IntelRow key={item.id} item={item} />)}
                               </div>
                             </motion.div>
                           )}
@@ -623,7 +647,7 @@ export default function App() {
                     )}
 
                     {high.length === 0 && mid.length === 0 && (
-                      <div style={{ textAlign: 'center', padding: 40, color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>暂无有效情报，5分钟后自动刷新</div>
+                      <div style={{ textAlign: 'center', padding: 50, color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>暂无有效情报，5分钟后自动刷新</div>
                     )}
                   </div>
                 );
