@@ -502,15 +502,19 @@ export default function App() {
                   </div>
                 )}
               </div>
-              <div style={{ background: '#16213e', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ background: '#131722', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 12, overflow: 'hidden' }}>
                 <iframe
-                  src="https://www.coingecko.com/en/coins/bitcoin/embedded"
-                  style={{ width: '100%', height: 460, border: 'none', display: 'block' }}
-                  title="BTC Price Chart"
+                  src="https://s.tradingview.com/embed-widget/mini-symbol-overview/?locale=zh_CN#%7B%22symbol%22%3A%22BINANCE%3ABTCUSDT%22%2C%22dateRange%22%3A%221D%22%2C%22colorTheme%22%3A%22dark%22%2C%22trendLineColor%22%3A%22%23f97316%22%2C%22underLineColor%22%3A%22rgba(249%2C115%2C22%2C0.15)%22%2C%22underLineBottomColor%22%3A%22rgba(0%2C0%2C0%2C0)%22%2C%22isTransparent%22%3Atrue%2C%22autosize%22%3Atrue%2C%22largeChartUrl%22%3A%22%22%7D"
+                  style={{ width: '100%', height: 220, border: 'none', display: 'block' }}
+                  title="BTC Mini Chart"
                 />
               </div>
-              <div style={{ ...card, padding: '10px 14px' }}>
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.6 }}>可切换 1D / 7D / 1M / 3M / 1Y 时间周期。</p>
+              <div style={{ background: '#131722', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 12, overflow: 'hidden' }}>
+                <iframe
+                  src="https://s.tradingview.com/embed-widget/advanced-chart/?locale=zh_CN#%7B%22autosize%22%3Atrue%2C%22symbol%22%3A%22BINANCE%3ABTCUSDT%22%2C%22interval%22%3A%22D%22%2C%22timezone%22%3A%22Asia%2FShanghai%22%2C%22theme%22%3A%22dark%22%2C%22style%22%3A%221%22%2C%22locale%22%3A%22zh_CN%22%2C%22withdateranges%22%3Atrue%2C%22hide_side_toolbar%22%3Afalse%2C%22allow_symbol_change%22%3Afalse%2C%22studies%22%3A%5B%22STD%3BRSI%22%5D%2C%22support_host%22%3A%22https%3A%2F%2Fwww.tradingview.com%22%7D"
+                  style={{ width: '100%', height: 500, border: 'none', display: 'block' }}
+                  title="BTC Chart"
+                />
               </div>
             </motion.div>
           )}
