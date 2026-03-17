@@ -536,9 +536,9 @@ useEffect(() => {
                 />
               </div>
             </motion.div>
-      
+      )}
 
-          {tab ==='intel' && (
+          {tab === 'intel' && (
             <motion.div key="intel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
