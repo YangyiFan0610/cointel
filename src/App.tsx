@@ -85,12 +85,21 @@ export default function App() {
   const cyclePhase = monthsSince >= 18 ? '回调期' : monthsSince >= 12 ? '顶部区域' : '牛市中期';
   const cycleColor = monthsSince >= 18 ? '#fb7185' : monthsSince >= 12 ? '#fbbf24' : '#34d399';
 
-  useEffect(() => {
+useEffect(() => {
     let alive = true;
     const run = async () => {
       if (!alive) return;
-      const fns = [
-        async () => {
+      try {
+        const r = await fetch('/api/price', { signal: AbortSignal.timeout(4000) });
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        if (!alive || !d.btc?.price) throw new Error();
+        setBtc(d.btc); setEth(d.eth);
+        if (d.fearGreed) setFg(d.fearGreed);
+        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        setPriceLoading(false);
+      } catch {
+        try {
           const [b, e] = await Promise.all([
             fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(5000) }),
             fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(5000) }),
@@ -98,41 +107,17 @@ export default function App() {
           if (!b.ok || !e.ok) throw new Error();
           const [bs, es] = await Promise.all([b.json(), e.json()]);
           const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice });
-          return { btc: p(bs), eth: p(es) };
-        },
-        async () => {
-          const r = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&sparkline=false', { signal: AbortSignal.timeout(6000) });
-          if (!r.ok) throw new Error();
-          const coins = await r.json();
-          const p = (c: any): CoinData => ({ price: c.current_price, change24h: c.price_change_percentage_24h, high24h: c.high_24h, low24h: c.low_24h, volume24h: c.total_volume });
-          return { btc: p(coins.find((c: any) => c.id === 'bitcoin')), eth: p(coins.find((c: any) => c.id === 'ethereum')) };
-        },
-        async () => {
-          const [b, e] = await Promise.all([
-            fetch('https://api.coincap.io/v2/assets/bitcoin', { signal: AbortSignal.timeout(6000) }),
-            fetch('https://api.coincap.io/v2/assets/ethereum', { signal: AbortSignal.timeout(6000) }),
-          ]);
-          const [bj, ej] = await Promise.all([b.json(), e.json()]);
-          const p = (d: any): CoinData => ({ price: +d.priceUsd, change24h: +d.changePercent24Hr, high24h: +d.priceUsd * 1.02, low24h: +d.priceUsd * 0.98, volume24h: +d.volumeUsd24Hr });
-          return { btc: p(bj.data), eth: p(ej.data) };
-        },
-      ];
-      for (const fn of fns) {
-        try {
-          const { btc: bd, eth: ed } = await fn();
-          if (!alive || !bd?.price || isNaN(bd.price)) continue;
-          setBtc(bd); setEth(ed);
+          if (!alive) return;
+          setBtc(p(bs)); setEth(p(es));
           setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           setPriceLoading(false);
-          return;
-        } catch { continue; }
+        } catch {}
       }
     };
     run();
-    const iv = setInterval(run, 10000);
+    const iv = setInterval(run, 8000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
-
   useEffect(() => {
     const load = async () => {
       try {
