@@ -86,40 +86,33 @@ export default function App() {
   const cycleColor = monthsSince >= 18 ? '#fb7185' : monthsSince >= 12 ? '#fbbf24' : '#34d399';
 
   useEffect(() => {
+    let ws: WebSocket | null = null;
     let alive = true;
-    const run = async () => {
-      if (!alive) return;
-      try {
-        // 优先用Vercel服务端代理（无GFW，最快）
-        const r = await fetch('/api/price', { signal: AbortSignal.timeout(4000) });
-        if (!r.ok) throw new Error('proxy fail');
-        const d = await r.json();
-        if (!alive || !d.btc?.price) throw new Error('bad data');
-        setBtc(d.btc); setEth(d.eth);
-        if (d.fearGreed) setFg(d.fearGreed);
-        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        setPriceLoading(false);
-        return;
-      } catch {
-        // 备用直连
+    const connect = () => {
+      ws = new WebSocket('wss://ws.okx.com:8443/ws/v5/public');
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({ op: 'subscribe', args: [{ channel: 'tickers', instId: 'BTC-USDT' }, { channel: 'tickers', instId: 'ETH-USDT' }] }));
+      };
+      ws.onmessage = (e) => {
         try {
-          const [b, e] = await Promise.all([
-            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(5000) }),
-            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(5000) }),
-          ]);
-          if (!b.ok || !e.ok) throw new Error();
-          const [bs, es] = await Promise.all([b.json(), e.json()]);
-          const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice });
-          if (!alive) return;
-          setBtc(p(bs)); setEth(p(es));
+          const msg = JSON.parse(e.data);
+          if (!msg.data?.[0]) return;
+          const d = msg.data[0];
+          const open = parseFloat(d.sodUtc8);
+          const last = parseFloat(d.last);
+          const coin: CoinData = { price: last, change24h: open ? ((last - open) / open) * 100 : 0, high24h: parseFloat(d.high24h), low24h: parseFloat(d.low24h), volume24h: parseFloat(d.volCcy24h) };
+          if (!alive || !coin.price || isNaN(coin.price)) return;
+          if (d.instId === 'BTC-USDT') setBtc(coin);
+          if (d.instId === 'ETH-USDT') setEth(coin);
           setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           setPriceLoading(false);
         } catch {}
-      }
+      };
+      ws.onerror = () => ws?.close();
+      ws.onclose = () => { if (alive) setTimeout(connect, 3000); };
     };
-    run();
-    const iv = setInterval(run, 8000);
-    return () => { alive = false; clearInterval(iv); };
+    connect();
+    return () => { alive = false; ws?.close(); };
   }, []);
 
   useEffect(() => {
@@ -520,68 +513,121 @@ export default function App() {
           )}
 
           {tab === 'intel' && (
-            <motion.div key="intel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {['全部', ...Object.values(DIM_META).map(d => d.label)].map(cat => (
-                    <button key={cat} onClick={() => setDimFilter(cat)} style={{ fontSize: 11, fontWeight: 600, padding: '5px 12px', borderRadius: 8, background: dimFilter === cat ? '#f97316' : 'rgba(255,255,255,0.07)', color: dimFilter === cat ? '#000' : 'rgba(255,255,255,0.5)', border: 'none', cursor: 'pointer' }}>{cat}</button>
-                  ))}
+            <motion.div key="intel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+              {/* 刷新按钮 */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <p style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>今日情报</p>
+                  <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>按影响BTC的程度排序，每5分钟更新</p>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {[{v:'score',l:'影响力'},{v:'time',l:'时间'}].map(s => (
-                    <button key={s.v} onClick={() => setSortBy(s.v as any)} style={{ fontSize: 9, fontWeight: 600, padding: '4px 8px', borderRadius: 6, background: sortBy === s.v ? 'rgba(255,255,255,0.15)' : 'transparent', color: sortBy === s.v ? '#fff' : 'rgba(255,255,255,0.3)', border: 'none', cursor: 'pointer' }}>{s.l}</button>
-                  ))}
-                  <button onClick={fetchIntel} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4 }}>
-                    <RefreshCw size={11} style={{ color: 'rgba(255,255,255,0.3)' }} className={intelLoading ? 'animate-spin' : ''} />
-                  </button>
-                </div>
+                <button onClick={fetchIntel} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 8, cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 11 }}>
+                  <RefreshCw size={11} className={intelLoading ? 'animate-spin' : ''} /> 刷新
+                </button>
               </div>
+
               {intelLoading ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {[0,1,2,3].map(i => <div key={i} style={{ ...card, height: 260 }} className="animate-pulse" />)}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[0,1,2,3,4].map(i => <div key={i} style={{ height: 72, background: 'rgba(255,255,255,0.05)', borderRadius: 10 }} className="animate-pulse" />)}
                 </div>
-              ) : filteredIntel.length === 0 ? (
-                <div style={{ ...card, textAlign: 'center', color: 'rgba(255,255,255,0.3)', padding: 40 }}>暂无有效信号</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {filteredIntel.map(item => {
-                    const dim = DIM_META[item.dimension];
-                    return (
-                      <div key={item.id} style={{ ...card, padding: 0, overflow: 'hidden' }}>
-                        <div style={{ height: 150, overflow: 'hidden', position: 'relative' }}>
-                          <img src={item.imageUrl} alt="" onError={e => { (e.target as HTMLImageElement).src = FALLBACK_IMGS[0]; }} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.75 }} referrerPolicy="no-referrer" />
-                          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #16213e, transparent)' }} />
-                          <div style={{ position: 'absolute', bottom: 10, left: 12, display: 'flex', gap: 6 }}>
-                            <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: dim.bg, color: dim.color }}>{dim.label}</span>
-                            <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: item.sentiment === 'bullish' ? 'rgba(52,211,153,0.2)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.2)' : 'rgba(255,255,255,0.1)', color: item.sentiment === 'bullish' ? '#34d399' : item.sentiment === 'bearish' ? '#fb7185' : '#94a3b8' }}>
-                              {item.sentiment === 'bullish' ? '看涨' : item.sentiment === 'bearish' ? '看跌' : '中性'}
-                            </span>
+              ) : (() => {
+                const high = intel.filter(i => i.impactScore >= 8);
+                const mid = intel.filter(i => i.impactScore >= 5 && i.impactScore < 8);
+                const low = intel.filter(i => i.impactScore < 5);
+
+                const IntelRow = ({ item, idx }: { item: IntelItem; idx: number }) => {
+                  const isExp = expandedId === item.id;
+                  const sentColor = item.sentiment === 'bullish' ? '#34d399' : item.sentiment === 'bearish' ? '#fb7185' : '#94a3b8';
+                  const sentLabel = item.sentiment === 'bullish' ? '▲ 看涨' : item.sentiment === 'bearish' ? '▼ 看跌' : '→ 中性';
+                  return (
+                    <div key={item.id} style={{ background: '#16213e', border: `0.5px solid ${item.sentiment === 'bullish' ? 'rgba(52,211,153,0.2)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.2)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, overflow: 'hidden' }}>
+                      <div style={{ padding: '12px 14px', cursor: 'pointer' }} onClick={() => setExpandedId(isExp ? null : item.id)}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <div style={{ minWidth: 28, height: 28, borderRadius: 7, background: item.impactScore >= 8 ? 'rgba(251,113,133,0.15)' : 'rgba(251,191,36,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: item.impactScore >= 8 ? '#fb7185' : '#fbbf24' }}>{item.impactScore}</span>
                           </div>
-                          <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,0,0,0.6)', borderRadius: 7, padding: '3px 8px' }}>
-                            <Cpu size={9} style={{ color: '#fbbf24' }} />
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24' }}>{item.impactScore}/10</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 12, fontWeight: 600, color: '#fff', lineHeight: 1.4, marginBottom: 4 }}>{item.title}</p>
+                            <p style={{ fontSize: 11, color: sentColor, lineHeight: 1.4 }}>{sentLabel} — {item.whyBTC}</p>
                           </div>
-                        </div>
-                        <div style={{ padding: '12px 16px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#f97316' }}>{item.source}</span>
-                            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{item.time}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)' }}>{item.source}</span>
+                            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)' }}>{item.time}</span>
                           </div>
-                          <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', lineHeight: 1.4, marginBottom: 6 }}>{item.title}</p>
-                          {item.summary && <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5, marginBottom: 10 }}>{item.summary}</p>}
-                          <div style={{ background: item.sentiment === 'bullish' ? 'rgba(52,211,153,0.07)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.07)' : 'rgba(255,255,255,0.04)', border: `0.5px solid ${item.sentiment === 'bullish' ? 'rgba(52,211,153,0.2)' : item.sentiment === 'bearish' ? 'rgba(251,113,133,0.2)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
-                            <p style={{ fontSize: 9, color: item.sentiment === 'bullish' ? '#34d399' : item.sentiment === 'bearish' ? '#fb7185' : 'rgba(255,255,255,0.35)', marginBottom: 3, fontWeight: 600 }}>对 BTC 的影响</p>
-                            <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>{item.whyBTC}</p>
-                          </div>
-                          <a href={item.link} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-                            <ExternalLink size={9} /> 阅读原文
-                          </a>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                      <AnimatePresence>
+                        {isExp && (
+                          <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} transition={{ duration: 0.15 }} style={{ overflow: 'hidden' }}>
+                            <div style={{ padding: '0 14px 12px', borderTop: '0.5px solid rgba(255,255,255,0.06)' }}>
+                              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6, marginTop: 10, marginBottom: 8 }}>{item.summary}</p>
+                              <a href={item.link} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#60a5fa', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <ExternalLink size={9} /> 阅读原文
+                              </a>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                };
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {/* 高影响 */}
+                    {high.length > 0 && (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fb7185' }} />
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#fb7185' }}>高影响 · {high.length}条</span>
+                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>评分 8-10</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {high.map((item, i) => <IntelRow key={item.id} item={item} idx={i} />)}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 中影响 */}
+                    {mid.length > 0 && (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fbbf24' }} />
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24' }}>中影响 · {mid.length}条</span>
+                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>评分 5-7</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {mid.map((item, i) => <IntelRow key={item.id} item={item} idx={i} />)}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 低影响折叠 */}
+                    {low.length > 0 && (
+                      <div>
+                        <button onClick={() => setExpandedId(expandedId === 'low-section' ? null : 'low-section')} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, marginBottom: expandedId === 'low-section' ? 10 : 0 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#94a3b8' }} />
+                          <span style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8' }}>低影响 · {low.length}条</span>
+                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>{expandedId === 'low-section' ? '收起 ↑' : '展开 ↓'}</span>
+                        </button>
+                        <AnimatePresence>
+                          {expandedId === 'low-section' && (
+                            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} style={{ overflow: 'hidden' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {low.map((item, i) => <IntelRow key={item.id} item={item} idx={i} />)}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
+
+                    {high.length === 0 && mid.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: 40, color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>暂无有效情报，5分钟后自动刷新</div>
+                    )}
+                  </div>
+                );
+              })()}
             </motion.div>
           )}
 
