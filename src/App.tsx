@@ -86,37 +86,48 @@ export default function App() {
   const cycleColor = monthsSince >= 18 ? '#fb7185' : monthsSince >= 12 ? '#fbbf24' : '#34d399';
 
 useEffect(() => {
+    let ws: WebSocket | null = null;
     let alive = true;
-    const run = async () => {
-      if (!alive) return;
-      try {
-        const r = await fetch('/api/price', { signal: AbortSignal.timeout(4000) });
-        if (!r.ok) throw new Error();
-        const d = await r.json();
-        if (!alive || !d.btc?.price) throw new Error();
-        setBtc(d.btc); setEth(d.eth);
-        if (d.fearGreed) setFg(d.fearGreed);
-        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        setPriceLoading(false);
-      } catch {
+
+    const connect = () => {
+      ws = new WebSocket('wss://ws.okx.com:8443/ws/v5/public');
+      
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({
+          op: 'subscribe',
+          args: [
+            { channel: 'tickers', instId: 'BTC-USDT' },
+            { channel: 'tickers', instId: 'ETH-USDT' },
+          ]
+        }));
+      };
+
+      ws.onmessage = (e) => {
         try {
-          const [b, e] = await Promise.all([
-            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(5000) }),
-            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(5000) }),
-          ]);
-          if (!b.ok || !e.ok) throw new Error();
-          const [bs, es] = await Promise.all([b.json(), e.json()]);
-          const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice });
-          if (!alive) return;
-          setBtc(p(bs)); setEth(p(es));
+          const msg = JSON.parse(e.data);
+          if (!msg.data?.[0]) return;
+          const d = msg.data[0];
+          const coin: CoinData = {
+            price: parseFloat(d.last),
+            change24h: parseFloat(d.sodUtc8) ? ((parseFloat(d.last) - parseFloat(d.sodUtc8)) / parseFloat(d.sodUtc8)) * 100 : 0,
+            high24h: parseFloat(d.high24h),
+            low24h: parseFloat(d.low24h),
+            volume24h: parseFloat(d.volCcy24h),
+          };
+          if (!alive || !coin.price || isNaN(coin.price)) return;
+          if (d.instId === 'BTC-USDT') setBtc(coin);
+          if (d.instId === 'ETH-USDT') setEth(coin);
           setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           setPriceLoading(false);
         } catch {}
-      }
+      };
+
+      ws.onerror = () => ws?.close();
+      ws.onclose = () => { if (alive) setTimeout(connect, 3000); };
     };
-    run();
-    const iv = setInterval(run, 8000);
-    return () => { alive = false; clearInterval(iv); };
+
+    connect();
+    return () => { alive = false; ws?.close(); };
   }, []);
   useEffect(() => {
     const load = async () => {
