@@ -510,25 +510,31 @@ useEffect(() => {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 {[
-                  { href: 'https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT&interval=D&theme=dark', color: '#3b82f6', title: 'TradingView 完整图表', desc: '日/周/月K · RSI · MACD · 支撑阻力\n在新标签页打开，功能最完整' },
-                  { href: 'https://www.binance.com/zh-CN/trade/BTC_USDT?type=spot', color: '#f59e0b', title: '币安行情页', desc: 'BTC/USDT 实时行情\n在新标签页打开' },
-                ].map((btn, i) => (
-                  <a key={i} href={btn.href} target="_blank" rel="noreferrer" style={{ ...card, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 28, textDecoration: 'none', cursor: 'pointer' }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 12, background: `${btn.color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <ExternalLink size={18} style={{ color: btn.color }} />
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>{btn.title}</p>
-                      <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>{btn.desc}</p>
-                    </div>
-                  </a>
-                ))}
+                 {tab === 'chart' && (
+            <motion.div key="chart" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f97316' }} />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>BTC / USDT</span>
+                  {btc && <span style={{ fontSize: 12, fontWeight: 600, color: btc.change24h >= 0 ? '#34d399' : '#fb7185' }}>{btc.change24h >= 0 ? '+' : ''}{btc.change24h.toFixed(2)}%</span>}
+                </div>
+                {btc && (
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    {[{l:'现价',v:`$${btc.price.toLocaleString(undefined,{maximumFractionDigits:0})}`,c:'#fff'},{l:'24H高',v:`$${btc.high24h.toLocaleString(undefined,{maximumFractionDigits:0})}`,c:'#34d399'},{l:'24H低',v:`$${btc.low24h.toLocaleString(undefined,{maximumFractionDigits:0})}`,c:'#fb7185'}].map((s,i) => (
+                      <div key={i} style={{ textAlign: 'right' }}>
+                        <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)' }}>{s.l}</p>
+                        <p style={{ fontSize: 12, fontWeight: 600, color: s.c }}>{s.v}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div style={{ ...card, padding: '12px 16px' }}>
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', lineHeight: 1.8 }}>
-                  <span style={{ color: '#34d399', fontWeight: 600 }}>绿色K线</span> = 收盘高于开盘（买方胜）&nbsp;&nbsp;<span style={{ color: '#fb7185', fontWeight: 600 }}>红色K线</span> = 收盘低于开盘（卖方胜）<br />
-                  实体越大代表买卖力量越强。影线越长代表该方向被压回的力量越强。成交量在K线下方，量大代表信号可信。
-                </p>
+              <div style={{ background: '#16213e', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 12, overflow: 'hidden' }}>
+                <iframe
+                  src="https://www.coingecko.com/en/coins/bitcoin/embedded"
+                  style={{ width: '100%', height: 450, border: 'none', display: 'block' }}
+                  title="BTC Price Chart"
+                />
               </div>
             </motion.div>
           )}
