@@ -85,51 +85,45 @@ export default function App() {
   const cyclePhase = monthsSince >= 18 ? '回调期' : monthsSince >= 12 ? '顶部区域' : '牛市中期';
   const cycleColor = monthsSince >= 18 ? '#fb7185' : monthsSince >= 12 ? '#fbbf24' : '#34d399';
 
-useEffect(() => {
-    let ws: WebSocket | null = null;
+  useEffect(() => {
     let alive = true;
-
-    const connect = () => {
-      ws = new WebSocket('wss://ws.okx.com:8443/ws/v5/public');
-      
-      ws.onopen = () => {
-        ws?.send(JSON.stringify({
-          op: 'subscribe',
-          args: [
-            { channel: 'tickers', instId: 'BTC-USDT' },
-            { channel: 'tickers', instId: 'ETH-USDT' },
-          ]
-        }));
-      };
-
-      ws.onmessage = (e) => {
+    const run = async () => {
+      if (!alive) return;
+      try {
+        // 优先用Vercel服务端代理（无GFW，最快）
+        const r = await fetch('/api/price', { signal: AbortSignal.timeout(4000) });
+        if (!r.ok) throw new Error('proxy fail');
+        const d = await r.json();
+        if (!alive || !d.btc?.price) throw new Error('bad data');
+        setBtc(d.btc); setEth(d.eth);
+        if (d.fearGreed) setFg(d.fearGreed);
+        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        setPriceLoading(false);
+        return;
+      } catch {
+        // 备用直连
         try {
-          const msg = JSON.parse(e.data);
-          if (!msg.data?.[0]) return;
-          const d = msg.data[0];
-          const coin: CoinData = {
-            price: parseFloat(d.last),
-            change24h: parseFloat(d.sodUtc8) ? ((parseFloat(d.last) - parseFloat(d.sodUtc8)) / parseFloat(d.sodUtc8)) * 100 : 0,
-            high24h: parseFloat(d.high24h),
-            low24h: parseFloat(d.low24h),
-            volume24h: parseFloat(d.volCcy24h),
-          };
-          if (!alive || !coin.price || isNaN(coin.price)) return;
-          if (d.instId === 'BTC-USDT') setBtc(coin);
-          if (d.instId === 'ETH-USDT') setEth(coin);
+          const [b, e] = await Promise.all([
+            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT', { signal: AbortSignal.timeout(5000) }),
+            fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT', { signal: AbortSignal.timeout(5000) }),
+          ]);
+          if (!b.ok || !e.ok) throw new Error();
+          const [bs, es] = await Promise.all([b.json(), e.json()]);
+          const p = (s: any): CoinData => ({ price: +s.lastPrice, change24h: +s.priceChangePercent, high24h: +s.highPrice, low24h: +s.lowPrice, volume24h: +s.volume * +s.lastPrice });
+          if (!alive) return;
+          setBtc(p(bs)); setEth(p(es));
           setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           setPriceLoading(false);
         } catch {}
-      };
-
-      ws.onerror = () => ws?.close();
-      ws.onclose = () => { if (alive) setTimeout(connect, 3000); };
+      }
     };
-
-    connect();
-    return () => { alive = false; ws?.close(); };
+    run();
+    const iv = setInterval(run, 8000);
+    return () => { alive = false; clearInterval(iv); };
   }, []);
+
   useEffect(() => {
+    // 恐惧贪婪已由 /api/price 一并返回，此处仅作5分钟补充刷新
     const load = async () => {
       try {
         const r = await fetch('https://api.alternative.me/fng/', { signal: AbortSignal.timeout(6000) });
@@ -490,31 +484,11 @@ useEffect(() => {
           )}
 
           {tab === 'chart' && (
-            <motion.div key="chart" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f97316' }} />
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>BTC / USDT</span>
-                  {btc && <span style={{ fontSize: 12, color: btc.change24h >= 0 ? '#34d399' : '#fb7185', fontWeight: 600 }}>{btc.change24h >= 0 ? '+' : ''}{btc.change24h.toFixed(2)}%</span>}
-                </div>
-                {btc && (
-                  <div style={{ display: 'flex', gap: 16 }}>
-                    {[{l:'现价',v:`$${btc.price.toLocaleString(undefined,{maximumFractionDigits:0})}`,c:'#fff'},{l:'24H高',v:`$${btc.high24h.toLocaleString(undefined,{maximumFractionDigits:0})}`,c:'#34d399'},{l:'24H低',v:`$${btc.low24h.toLocaleString(undefined,{maximumFractionDigits:0})}`,c:'#fb7185'}].map((s,i) => (
-                      <div key={i} style={{ textAlign: 'right' }}>
-                        <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)' }}>{s.l}</p>
-                        <p style={{ fontSize: 12, fontWeight: 600, color: s.c }}>{s.v}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-             
-                 {tab === 'chart' && (
             <motion.div key="chart" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f97316' }} />
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>BTC / USDT</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>BTC 价格走势</span>
                   {btc && <span style={{ fontSize: 12, fontWeight: 600, color: btc.change24h >= 0 ? '#34d399' : '#fb7185' }}>{btc.change24h >= 0 ? '+' : ''}{btc.change24h.toFixed(2)}%</span>}
                 </div>
                 {btc && (
@@ -531,12 +505,15 @@ useEffect(() => {
               <div style={{ background: '#16213e', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 12, overflow: 'hidden' }}>
                 <iframe
                   src="https://www.coingecko.com/en/coins/bitcoin/embedded"
-                  style={{ width: '100%', height: 450, border: 'none', display: 'block' }}
+                  style={{ width: '100%', height: 460, border: 'none', display: 'block' }}
                   title="BTC Price Chart"
                 />
               </div>
+              <div style={{ ...card, padding: '10px 14px' }}>
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.6 }}>可切换 1D / 7D / 1M / 3M / 1Y 时间周期。</p>
+              </div>
             </motion.div>
-      )}
+          )}
 
           {tab === 'intel' && (
             <motion.div key="intel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
